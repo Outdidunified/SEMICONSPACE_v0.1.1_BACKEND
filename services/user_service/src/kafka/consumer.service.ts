@@ -19,7 +19,7 @@ export class ConsumerService {
     const topics = ['user.registered']; // Listening to the 'user.registered' topic
 
     try {
-      console.log('🔌 Connecting to Kafka...');
+      console.log(' Connecting to Kafka...');
       await this.consumer.connect();
 
       for (const topic of topics) {
@@ -38,11 +38,11 @@ export class ConsumerService {
       const payload = JSON.parse(message.value.toString());
       console.log('Parsed Kafka payload:', payload);
 
-      // ✅ Adjust for wrapped payload
+      //  Adjust for wrapped payload
       const data = payload.data;
 
  if (topic === 'user.registered' && data?.userId) {
-  console.log('👀 Received created_by:', data.created_by); // log first
+  console.log(' Received created_by:', data.created_by); // log first
 
   const exists = await Profile.findByPk(data.userId);
   if (!exists) {
@@ -65,9 +65,9 @@ export class ConsumerService {
     console.log('📦 Inserting profile:', profilePayload);
 
     const newProfile = await Profile.create(profilePayload);
-    console.log('✅ Profile created in DB:', newProfile.toJSON());
+    console.log(' Profile created in DB:', newProfile.toJSON());
   } else {
-    console.log(`ℹ️ Profile already exists for user: ${data.userId}`);
+    console.log(`ℹ️Profile already exists for user: ${data.userId}`);
   }
 }
 
