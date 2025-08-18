@@ -2,10 +2,10 @@
   "name": "user-service",
   "version": "1.0.0",
   "scripts": {
-    "start": "ts-node-dev --respawn main.ts",   
-    "start:dev": "ts-node-dev --respawn main.ts",  
-    "build": "nest build",  
-    "start:prod": "node dist/main.js"  
+    "start": "ts-node-dev --respawn main.ts",
+    "start:dev": "ts-node-dev --respawn main.ts",
+    "build": "nest build",
+    "start:prod": "node dist/main.js"
   },
   "dependencies": {
     "@nestjs/common": "^9.4.3",
@@ -15,6 +15,7 @@
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.2",
     "dotenv": "^17.0.1",
+    "express-rate-limit": "^8.0.1",
     "kafkajs": "^2.2.4",
     "pg": "^8.16.3",
     "reflect-metadata": "^0.1.14",
