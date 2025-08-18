@@ -1,0 +1,21 @@
+
+
+// File: services/order_service/tsconfig.json
+{
+  "compilerOptions": {
+    "module": "commonjs",
+    "target": "es2017",
+    "lib": ["es2017"],
+    "declaration": true,
+    "sourceMap": true,
+    "outDir": "./dist",                     // Output directory for compiled JS files
+    "strict": false,                        // Optional, set to true for stricter checks
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+    "moduleResolution": "node"
+  },
+  "include": ["**/*.ts"],                   // Include all TypeScript files in the project
+  "exclude": ["node_modules", "dist"]       // Exclude node_modules and dist folders
+}

@@ -1,0 +1,30 @@
+# Web Framework
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+
+# HTTP Client
+httpx==0.25.2
+
+# Database
+sqlalchemy==2.0.23
+asyncpg==0.29.0
+psycopg2-binary==2.9.9
+
+# Authentication & Security
+passlib[bcrypt]==1.7.4
+python-jose[cryptography]==3.3.0
+bcrypt==4.0.1
+
+# Data Validation
+pydantic==2.4.2
+email-validator==2.1.0
+
+# Kafka Client
+aiokafka==0.10.0
+
+# Configuration
+python-dotenv==1.0.0
+
+# Utilities
+uuid==1.30
+python-dateutil==2.8.2

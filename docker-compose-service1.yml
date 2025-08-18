@@ -1,0 +1,77 @@
+services:
+  api-gateway:
+    build:
+      context: ./api-gateway
+      dockerfile: Dockerfile
+    image: api-gateway
+    container_name: api-gateway
+    networks:
+      - appnet
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./api-gateway/Log:/app/Log
+      - ./api-gateway/.env:/app/.env
+    environment:
+      - NODE_ENV=development
+    restart: unless-stopped
+
+  auth-service:
+    build:
+      context: ./services/auth_service
+      dockerfile: Dockerfile
+    image: auth-service
+    container_name: auth-service
+    networks:
+      - appnet
+    ports:
+      - "8001:8001"
+    environment:
+      - NODE_ENV=development
+    restart: unless-stopped
+
+  user-service:
+    build:
+      context: ./services/user_service
+      dockerfile: Dockerfile
+    image: user-service
+    container_name: user-service
+    networks:
+      - appnet
+    ports:
+      - "8002:8002"
+    environment:
+      - NODE_ENV=development
+    restart: unless-stopped
+
+  product-service:
+    build:
+      context: ./services/product_service
+      dockerfile: Dockerfile
+    image: product-service
+    container_name: product-service
+    networks:
+      - appnet
+    ports:
+      - "8003:8003"
+    environment:
+      - NODE_ENV=development
+    restart: unless-stopped
+
+  search-service:
+    build:
+      context: ./services/search_service
+      dockerfile: Dockerfile
+    image: search-service
+    container_name: search-service
+    networks:
+      - appnet
+    ports:
+      - "8004:8004"
+    environment:
+      - NODE_ENV=development
+    restart: unless-stopped
+
+networks:
+  appnet:
+    driver: bridge
