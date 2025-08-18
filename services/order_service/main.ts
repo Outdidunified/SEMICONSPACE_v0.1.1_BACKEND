@@ -1,27 +1,39 @@
-// services/order_service/main.ts
-
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
-import { KafkaConsumerService } from './kafka/consumer.service';
 import { ValidationPipe } from '@nestjs/common';
+import { GlobalErrorFilter } from './src/middlewares/errorHandler';
 import * as dotenv from 'dotenv';
 
 async function bootstrap() {
   dotenv.config();
 
-
   const app = await NestFactory.create(AppModule);
 
-  app.useGlobalPipes(new ValidationPipe());
+  // ✅ Apply validation globally
+  app.useGlobalPipes(
+    new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+      stopAtFirstError: false,
+    }),
+  );
 
-  const consumer = app.get(KafkaConsumerService);
-  // await consumer.startConsumer();
-    app.enableCors();  // Enable CORS
+  //  Global error handler
+  app.useGlobalFilters(new GlobalErrorFilter());
 
+  //  Enable CORS
+  app.enableCors();
 
   const PORT = process.env.PORT || 8006;
-  await app.listen(PORT);
-  console.log(`🚀 Server running on http://localhost:${PORT}`);
+
+  try {
+    await app.listen(PORT);
+    console.log(`🚀 Server running on http://localhost:${PORT}`);
+  } catch (err) {
+    console.error('Failed to start server:', err);
+    process.exit(1); // Fatal if HTTP server can't start
+  }
 }
 
 bootstrap();
