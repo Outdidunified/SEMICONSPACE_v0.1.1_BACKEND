@@ -1,0 +1,74 @@
+services:
+  cart-service:
+    build:
+      context: ./services/cart_service
+      dockerfile: Dockerfile
+    image: cart-service
+    container_name: cart-service
+    networks:
+      - appnet
+    ports:
+      - "8005:8005"
+    environment:
+      - NODE_ENV=development
+    restart: unless-stopped
+
+  order-service:
+    build:
+      context: ./services/order_service
+      dockerfile: Dockerfile
+    image: order-service
+    container_name: order-service
+    networks:
+      - appnet
+    ports:
+      - "8006:8006"
+    environment:
+      - NODE_ENV=development
+    restart: unless-stopped
+
+  payment-service:
+    build:
+      context: ./services/payment_service
+      dockerfile: Dockerfile
+    image: payment-service
+    container_name: payment-service
+    networks:
+      - appnet
+    ports:
+      - "8007:8007"
+    environment:
+      - NODE_ENV=development
+    restart: unless-stopped
+
+  notification-service:
+    build:
+      context: ./services/notification_service
+      dockerfile: Dockerfile
+    image: notification-service
+    container_name: notification-service
+    networks:
+      - appnet
+    ports:
+      - "8008:8008"
+    environment:
+      - NODE_ENV=development
+    restart: unless-stopped
+
+  digikey-service:
+    build:
+      context: ./services/digikey_service
+      dockerfile: Dockerfile
+    image: digikey-service
+    container_name: digikey-service
+    networks:
+      - appnet
+    ports:
+      - "8009:8009"
+    environment:
+      - NODE_ENV=development
+    restart: unless-stopped
+
+networks:
+  appnet:
+    driver: bridge
