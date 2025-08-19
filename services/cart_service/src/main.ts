@@ -1,19 +1,15 @@
+// main.ts
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { MicroserviceOptions, Transport } from '@nestjs/microservices';
 import { ValidationPipe, Logger } from '@nestjs/common';
+import { GlobalErrorFilter } from './middlewares/errorHandler';
 import { ConfigService } from '@nestjs/config';
-// Import these after installing the packages
-// import helmet from 'helmet';
-// import * as compression from 'compression';
-// import { ThrottlerGuard } from '@nestjs/throttler';
-import { APP_GUARD } from '@nestjs/core';
 import * as os from 'os';
 
 // For Node.js cluster support
 let cluster: any;
 try {
-  // Dynamic import for cluster
   cluster = require('cluster');
 } catch (e) {
   console.error('Cluster module not available');
@@ -34,7 +30,7 @@ async function bootstrap() {
     logger.log('✅ Nest app created');
 
     const configService = app.get(ConfigService);
-    const port = configService.get<number>('PORT', 8005); // make sure this matches Dockerfile
+    const port = configService.get<number>('PORT', 8005);
     const environment = configService.get<string>('NODE_ENV', 'development');
     const kafkaBrokers = configService.get<string>('KAFKA_BROKERS', '172.235.17.60:9092').split(',');
 
@@ -49,6 +45,10 @@ async function bootstrap() {
     );
 
     logger.log('📦 ValidationPipe applied');
+
+    // Global error handler
+    app.useGlobalFilters(new GlobalErrorFilter());
+    logger.log('🛡️ GlobalErrorFilter applied');
 
     // Kafka microservice setup
     logger.log('🔌 Connecting to Kafka...');
@@ -71,6 +71,10 @@ async function bootstrap() {
 
     logger.log('✅ Kafka microservice configured');
 
+    // Enable shutdown hooks for graceful termination
+    app.enableShutdownHooks();
+    logger.log('🛑 Shutdown hooks enabled');
+
     await app.startAllMicroservices();
     logger.log('🚀 Microservices started');
 
@@ -82,54 +86,35 @@ async function bootstrap() {
   }
 }
 
-
-// Use Node.js cluster module to utilize all CPU cores in production
+// Use Node.js cluster module in production
 if (cluster && process.env.NODE_ENV === 'production' && cluster.isPrimary) {
   const numCPUs = os.cpus().length;
   logger.log(`🧠 Primary process running. Starting ${numCPUs} workers...`);
 
-  // Fork workers for each CPU
   for (let i = 0; i < numCPUs; i++) {
     cluster.fork();
   }
 
-  // Handle worker crashes
   cluster.on('exit', (worker: any, code: number, signal: string) => {
     logger.warn(`Worker ${worker.process.pid} died with code ${code} and signal ${signal}`);
     logger.log('Starting a new worker...');
     cluster.fork();
   });
 } else {
-  // Worker processes or development mode
   bootstrap().catch((err: Error) => {
     logger.error(`Failed to bootstrap application: ${err.message}`, err.stack);
     process.exit(1);
   });
 }
 
-// Handle unhandled promise rejections
-process.on('unhandledRejection', (reason: any, promise: Promise<any>) => {
-  logger.error('Unhandled Rejection at:', promise, 'reason:', reason);
-});
-
-// Handle uncaught exceptions
-process.on('uncaughtException', (error: Error) => {
-  logger.error('Uncaught Exception:', error);
-  // Give the process time to log the error before exiting
-  setTimeout(() => {
-    process.exit(1);
-  }, 1000);
-});
-
-// Handle unhandled promise rejections
+// Handle unhandled promise rejections (single listener)
 process.on('unhandledRejection', (reason, promise) => {
   logger.error('Unhandled Rejection at:', promise, 'reason:', reason);
 });
 
-// Handle uncaught exceptions
+// Handle uncaught exceptions (single listener)
 process.on('uncaughtException', (error) => {
   logger.error('Uncaught Exception:', error);
-  // Give the process time to log the error before exiting
   setTimeout(() => {
     process.exit(1);
   }, 1000);
