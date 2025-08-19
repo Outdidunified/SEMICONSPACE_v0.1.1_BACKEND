@@ -1,8 +1,9 @@
-import { IsString, IsOptional, IsNumber } from 'class-validator';
+import { IsString, IsOptional, IsNumber,IsNotEmpty } from 'class-validator';
 
 export class UpdateManagerOrderDto {
-  @IsString()
-  orderId: string;
+@IsString()
+  @IsNotEmpty()
+  orderId: string;   // ✅ Required field
 
   @IsOptional()
   @IsString()
