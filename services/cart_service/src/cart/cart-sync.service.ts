@@ -21,6 +21,19 @@ export class CartSyncService {
 
     try {
       const redisClient = this.redisService.getClient();
+
+      // First process explicit clear-sync flags set by HTTP clearCart
+      const clearSyncKeys = await redisClient.keys("cart_clear_sync_needed:*");
+      for (const flagKey of clearSyncKeys) {
+        const userId = flagKey.split(":")[1];
+        const existingItems = await this.cartItemRepo.find({ where: { userId } });
+        if (existingItems.length > 0) {
+          await this.cartItemRepo.remove(existingItems);
+          this.logger.log(`🗑️ Cleared ${existingItems.length} DB items for user ${userId} (clear sync)`);
+        }
+        await redisClient.del(flagKey);
+      }
+
       const keys = await redisClient.keys("cart:*");
 
       for (const key of keys) {
@@ -59,6 +72,16 @@ export class CartSyncService {
         this.logger.log(
           `🔍 Found ${entries.length} items in Redis for user ${userId}`
         );
+
+        // If Redis cart exists but is empty, ensure DB is cleared for this user
+        if (entries.length === 0) {
+          const existingItems = await this.cartItemRepo.find({ where: { userId } });
+          if (existingItems.length > 0) {
+            await this.cartItemRepo.remove(existingItems);
+            this.logger.log(`🗑️ Removed ${existingItems.length} DB items for user ${userId} (empty Redis cart)`);
+          }
+          continue;
+        }
 
         const items: DeepPartial<CartItem>[] = [];
         
@@ -133,48 +156,49 @@ export class CartSyncService {
           }
         }
 
-        // ✅ Instead of deleting all and re-saving, let's do a smarter sync
+        // ✅ Instead of deleting all and re-saving, do a conflict-safe sync
         const existingItems = await this.cartItemRepo.find({ where: { userId } });
-        const existingProductIds = new Set(existingItems.map(item => item.productId));
         const redisProductIds = new Set(items.map(item => item.productId));
 
-        // ✅ Remove items that are in DB but not in Redis (they were removed)
+        // 1) Remove items that are in DB but not in Redis (they were removed)
         const itemsToRemove = existingItems.filter(item => !redisProductIds.has(item.productId));
         if (itemsToRemove.length > 0) {
           await this.cartItemRepo.remove(itemsToRemove);
           this.logger.log(`🗑️ Removed ${itemsToRemove.length} items no longer in Redis for user ${userId}`);
         }
 
-        // ✅ Update or insert items from Redis
-        for (const item of items) {
-          const existing = existingItems.find(e => e.productId === item.productId);
-          
-          if (existing) {
-            // Update existing item if Redis data is newer or different
-            const needsUpdate = 
-              existing.quantity !== item.quantity ||
-              existing.price !== item.price ||
-              existing.name !== item.name;
-              
-            if (needsUpdate) {
-              await this.cartItemRepo.update(
-                { id: existing.id },
-                {
-                  ...item,
-                  modifiedDate: new Date(),
-                  createdDate: existing.createdDate, // Preserve original creation date
-                }
-              );
-              this.logger.log(`🔄 Updated item ${item.productId} for user ${userId}`);
+        // 2) Clean up any DB duplicates by (userId, productId) keeping the most recent
+        const byProduct: Record<string, CartItem[]> = {} as any;
+        for (const it of existingItems) {
+          if (!byProduct[it.productId]) byProduct[it.productId] = [];
+          byProduct[it.productId].push(it);
+        }
+        let cleaned = 0;
+        for (const [pid, arr] of Object.entries(byProduct)) {
+          if (arr.length > 1) {
+            arr.sort((a, b) => new Date(b.modifiedDate || b.createdDate || 0).getTime() - new Date(a.modifiedDate || a.createdDate || 0).getTime());
+            const keep = arr[0];
+            const remove = arr.slice(1);
+            if (remove.length) {
+              await this.cartItemRepo.remove(remove);
+              cleaned += remove.length;
             }
-          } else {
-            // Insert new item
-            await this.cartItemRepo.save(item);
-            this.logger.log(`➕ Added new item ${item.productId} for user ${userId}`);
           }
         }
+        if (cleaned > 0) {
+          this.logger.log(`🧹 Cleaned ${cleaned} duplicate DB rows for user ${userId}`);
+        }
 
-        this.logger.log(`✅ Sync completed for user ${userId}: ${items.length} items in Redis, ${existingItems.length} items were in DB`);
+        // 3) Upsert Redis items into DB atomically on (userId, productId)
+        await this.cartItemRepo.upsert(
+          items.map(it => ({
+            ...it,
+            modifiedDate: new Date(),
+          })),
+          ['userId', 'productId']
+        );
+
+        this.logger.log(`✅ Sync completed for user ${userId}: upserted ${items.length} items from Redis`);
       }
     } catch (error) {
       this.logger.error("❌ Failed to sync cart:", error.message);

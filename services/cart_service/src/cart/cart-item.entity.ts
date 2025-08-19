@@ -1,5 +1,7 @@
-import { Entity, Column, PrimaryGeneratedColumn } from 'typeorm';
+import { Entity, Column, PrimaryGeneratedColumn, Unique } from 'typeorm';
 
+// Ensure (userId, productId) is unique to avoid duplicates
+@Unique(['userId', 'productId'])
 @Entity('cart_items')
 export class CartItem {
   @PrimaryGeneratedColumn('uuid')
