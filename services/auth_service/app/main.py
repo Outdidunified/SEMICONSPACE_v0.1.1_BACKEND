@@ -1,25 +1,45 @@
+# main.py
+import asyncio
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from contextlib import asynccontextmanager
-import logging
-import asyncio
 from sqlalchemy.exc import OperationalError
+from sqlalchemy.ext.asyncio import AsyncEngine
 
-from app.register import router as register_router
-from app.login import router as login_router
-from app.Admin_login import router as admin_login_router
-#from app.OrderManager import router as Order_login_router
-#from app.Productmanager_login import router as product_manager_login_router
-#from app.UserManager import router as user_manager_login_router
-from app.kafka_producer import start_kafka, stop_kafka
-from app.kafka_consumer import start_consumer
-from app.database import engine, Base
+from app.config.database import engine, Base
+from app.routes.register import router as register_router
+from app.routes.login import router as login_router
+from app.routes.Admin_login import router as admin_login_router
+from app.services.kafka_producer import start_kafka, stop_kafka
+from app.services.kafka_consumer import start_consumer
+from app.utils.logger import logger
+from app.middlewares import errorhandel
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+consumer_task: asyncio.Task | None = None
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
+# ---------------- FastAPI app ---------------- #
+app = FastAPI()
+
+# ---------------- Middleware ---------------- #
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# ---------------- Routers ---------------- #
+app.include_router(register_router)
+app.include_router(login_router)
+app.include_router(admin_login_router)
+
+# ---------------- Exception Handlers ---------------- #
+errorhandel.register_exception_handlers(app)
+
+# ---------------- Startup Event ---------------- #
+@app.on_event("startup")
+async def startup_event():
+    global consumer_task
     # Start Kafka producer
     try:
         await start_kafka()
@@ -27,7 +47,7 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"⚠️ Kafka startup failed: {e}. Continuing without Kafka.")
 
-    # Wait for DB
+    # Wait for DB connection and create tables
     attempt = 0
     while True:
         try:
@@ -42,29 +62,17 @@ async def lifespan(app: FastAPI):
 
     # Start Kafka consumer task
     consumer_task = asyncio.create_task(start_consumer())
+    logger.info("🚀 Kafka consumer task started")
 
-    yield
-
-    consumer_task.cancel()
+# ---------------- Shutdown Event ---------------- #
+@app.on_event("shutdown")
+async def shutdown_event():
+    global consumer_task
+    if consumer_task:
+        consumer_task.cancel()
+        try:
+            await consumer_task
+        except asyncio.CancelledError:
+            logger.info("🛑 Kafka consumer task stopped")
     await stop_kafka()
     logger.info("🛑 Kafka producer stopped")
-
-# Initialize FastAPI
-app = FastAPI(lifespan=lifespan)
-
-# Enable CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# Register routers
-app.include_router(register_router)
-app.include_router(login_router)
-app.include_router(admin_login_router)
-# app.include_router(Order_login_router)
-# app.include_router(product_manager_login_router)
-# app.include_router(user_manager_login_router)

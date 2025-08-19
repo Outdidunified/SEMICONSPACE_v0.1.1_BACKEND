@@ -6,13 +6,13 @@ from aiokafka.errors import KafkaConnectionError
 from sqlalchemy import text
 from datetime import datetime
 from dateutil.parser import isoparse  # For parsing ISO 8601 strings
-from app.database import SessionLocal as async_session
+from app.config.database import SessionLocal as async_session
 
 logger = logging.getLogger(__name__)
 
 KAFKA_BOOTSTRAP_SERVERS = "172.235.17.60:9092"
 KAFKA_GROUP_ID = "user-events-group"
-TOPICS = ["user.created", "user.status.updated", "user.phone.updated"]
+TOPICS = ["user.created", "user.status.updated", "user.phone.updated","user.password.updated"]
 
 # -----------------------------
 # Core Kafka consume loop
@@ -52,6 +52,8 @@ async def consume():
                     await handle_user_status_updated(data)
                 elif topic == "user.phone.updated":
                     await handle_user_phone_updated(data)
+                elif topic == "user.password.updated":
+                    await handle_user_password_updated(data)
 
             except Exception as e:
                 logger.error(f"❌ Error handling {topic} for user {user_id}: {e}")
@@ -198,3 +200,43 @@ async def start_consumer():
         except Exception as e:
             logger.error(f"❌ Unexpected Kafka consumer error: {e}. Retrying in 5 seconds...")
             await asyncio.sleep(5)
+
+async def handle_user_password_updated(data):
+    async with async_session() as session:
+        required_fields = ["userId", "email", "password", "modifiedBy", "modifiedDate"]
+        if not all(field in data for field in required_fields):
+            logger.error(f"Missing required fields in user.password.updated event: {data}")
+            return
+
+        # Parse modifiedDate to datetime (make naive)
+        try:
+            modified_at = isoparse(data["modifiedDate"]).replace(tzinfo=None)
+        except ValueError:
+            logger.error(f"Invalid modifiedDate format in user.password.updated event: {data['modifiedDate']}")
+            return
+
+        # ⚠️ Storing raw password is insecure — hashing should be done before insertion
+        query = text("""
+            UPDATE public.users
+            SET password = :password,
+                modified_by = :modified_by,
+                modified_at = :modified_at
+            WHERE "userId" = :userId AND email = :email
+        """)
+        try:
+            await session.execute(query, {
+                "password": data["password"],  # You should hash this
+                "modified_by": data["modifiedBy"],
+                "modified_at": modified_at,
+                "userId": data["userId"],
+                "email": data["email"]
+            })
+            await session.commit()
+            logger.info(f"✅ Processed event user.password.updated for user {data['userId']}")
+        except Exception as e:
+            logger.error(f"Database error in user.password.updated: {e}")
+            await session.rollback()
+
+
+
+            
