@@ -1,29 +1,23 @@
-import os
-import re
+# app/login.py
 import logging
-from typing import Pattern
+import re
 from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from passlib.context import CryptContext
-from jose import jwt
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
+from app.models import models
+from app.schemas.schemas import LoginRequest
+from app.config.database import get_db
+from app.services import kafka_producer
+from app.utils.jwt_utils import create_token
 
-from app.database import get_db
-from app import models, schemas, kafka_producer
-from dotenv import load_dotenv
-
-load_dotenv()
 
 router = APIRouter()
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+logger = logging.getLogger("auth")
 
-SECRET_KEY = os.environ["JWT_SECRET"]
-ALGORITHM = os.environ["JWT_ALGORITHM"]
-#ACCESS_TOKEN_EXPIRE_MINUTES = int(os.environ["ACCESS_TOKEN_EXPIRE_MINUTES"])
+EMAIL_REGEX = re.compile(r"^[^@]+@[^@]+\.[^@]+$")
+MOBILE_REGEX = re.compile(r"^(?:\+91)?[6-9]\d{9}$")
 
-EMAIL_REGEX: Pattern[str] = re.compile(r"^[^@]+@[^@]+\.[^@]+$")
-MOBILE_REGEX: Pattern[str] = re.compile(r"^(?:\+91)?[6-9]\d{9}$")
 
 def is_valid_email(identifier: str) -> bool:
     return bool(EMAIL_REGEX.match(identifier))
@@ -36,35 +30,33 @@ def normalize_mobile(identifier: str) -> str:
     if identifier.startswith("+91"):
         return identifier[3:]
     return identifier
-
-def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return pwd_context.verify(plain_password, hashed_password)
-
-def create_token(data: dict) -> str:
-    to_encode = data.copy()
-    #expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    #to_encode["exp"] = expire
-    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-@router.post("/auth/Admin_login", response_model=schemas.TokenResponse)
-async def admin_login(request: schemas.LoginRequest, db: AsyncSession = Depends(get_db)):
+@router.post("/auth/admin_login")
+async def admin_login(request: LoginRequest, db: AsyncSession = Depends(get_db)):
     """
-    Admin login endpoint that checks credentials against the user table
-    Specifically for admin users (role_id = 1)
+    Admin login endpoint for users with role_id in [1,3,4,5]
     """
     logger = logging.getLogger(__name__)
     
     identifier = request.identifier.strip()
-    is_email = is_valid_email(identifier)
-    is_mobile = is_valid_mobile(identifier)
+    is_email = bool(EMAIL_REGEX.match(identifier))
+    is_mobile = bool(MOBILE_REGEX.match(identifier))
 
+    # Validate identifier
     if not (is_email or is_mobile):
-        logger.warning("❌ Invalid login identifier format")
-        raise HTTPException(status_code=400, detail="Invalid email or mobile number format")
+        if "@" in identifier or "." in identifier or identifier.isalnum():
+            detail_msg = "Invalid email format"
+        elif identifier.isdigit() or identifier.startswith("+"):
+            detail_msg = "Invalid mobile number format"
+        else:
+            detail_msg = "Invalid login identifier"
+        logger.warning(f"❌ {detail_msg}: {identifier}")
+        raise HTTPException(status_code=400, detail=detail_msg)
 
+    # Normalize mobile
     if is_mobile:
         identifier = normalize_mobile(identifier)
 
-    # Query admin user with allowed role_ids (1, 3, 4, 5)
+    # Fetch admin user
     result = await db.execute(
         select(models.User).where(
             ((models.User.email == identifier) | (models.User.phone == identifier)) &
@@ -80,14 +72,13 @@ async def admin_login(request: schemas.LoginRequest, db: AsyncSession = Depends(
     if not getattr(user, "status", False):
         logger.warning(f"❌ User account is inactive: {identifier}")
         raise HTTPException(status_code=403, detail="User account is inactive")
-    # 🔄 Changed this line for plain-text comparison
 
-    # Check password against user table
+    # Plain-text password check
     if request.password != str(user.password):
         logger.warning(f"❌ Incorrect password attempt for admin: {identifier}")
         raise HTTPException(status_code=401, detail="Incorrect password")
 
-    # Create JWT token for admin
+    # Create JWT token
     token = create_token({
         "userId": str(user.userId),
         "role": user.role,
@@ -98,7 +89,7 @@ async def admin_login(request: schemas.LoginRequest, db: AsyncSession = Depends(
 
     logger.info(f"✅ Admin logged in successfully: {identifier} (Role ID: {user.role_id})")
 
-    # Send Kafka event for admin login
+    # Kafka event
     try:
         await kafka_producer.send_event(
             "admin.loggedin",
@@ -117,15 +108,20 @@ async def admin_login(request: schemas.LoginRequest, db: AsyncSession = Depends(
     except Exception as e:
         logger.error(f"⚠️ Kafka admin login event error for {user.email}: {e}")
 
+    # Success response
     return {
-        "access_token": token,
-        "token_type": "bearer",
-        "userId": str(user.userId),
-        "role": user.role,
-        "role_id": user.role_id,
-        "email": user.email,
-        "phone": user.phone,
-        "first_name": user.first_name,
-        "last_name": user.last_name,
-        "type": "admin"
+        "success": True,
+        "message": "Admin logged in successfully",
+        "data": {
+           "access_token": token,
+            "token_type": "bearer",
+            "userId": str(user.userId),
+            "role": user.role,
+            "role_id": user.role_id,
+            "email": user.email,
+            "phone": user.phone,
+            "first_name": user.first_name,
+            "last_name": user.last_name,
+            "type": "admin"
+        }
     }

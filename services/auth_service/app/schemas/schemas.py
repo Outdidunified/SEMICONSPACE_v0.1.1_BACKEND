@@ -1,7 +1,8 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr,constr
 from uuid import UUID
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Any, Union
+
 
 class RegisterRequest(BaseModel):
     first_name: str
@@ -13,9 +14,9 @@ class RegisterRequest(BaseModel):
 
 
 class LoginRequest(BaseModel):
-    identifier: str 
+    identifier: str
     password: str
-    role_id: Optional[int]=2
+    role_id: Optional[int] = 2
 
 
 class UserResponse(BaseModel):
@@ -48,3 +49,10 @@ class TokenResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# ✅ Flexible response wrapper
+class APIResponse(BaseModel):
+    success: bool
+    message: str
+    data: Optional[Any] = None   # can be TokenResponse, UserResponse, [] etc.
