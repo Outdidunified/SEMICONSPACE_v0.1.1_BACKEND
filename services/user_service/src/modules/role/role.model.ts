@@ -1,5 +1,5 @@
 // modules/role/role.model.ts
-import { Column, Model, Table, DataType } from 'sequelize-typescript';
+import { Column, Model, Table, DataType, Index } from 'sequelize-typescript';
 
 @Table({ tableName: 'user_roles', timestamps: false })
 export class Role extends Model<Role> {
@@ -10,8 +10,11 @@ export class Role extends Model<Role> {
   })
   _id: string;
 
+  @Index('idx_user_roles_role_id')
   @Column({ type: DataType.INTEGER, unique: true, allowNull: false })
   role_id: number;
+
+
 
   @Column({ type: DataType.STRING, allowNull: false })
   role_name: string;
