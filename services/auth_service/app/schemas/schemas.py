@@ -19,6 +19,17 @@ class LoginRequest(BaseModel):
     role_id: Optional[int] = 2
 
 
+# Google auth requests
+class GoogleRegisterRequest(BaseModel):
+    id_token: str
+    phone: str
+    role_id: int
+
+
+class GoogleLoginRequest(BaseModel):
+    id_token: str
+
+
 class UserResponse(BaseModel):
     userId: UUID
     first_name: str
