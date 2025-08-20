@@ -233,7 +233,7 @@ async def get_product_by_id(product_id: str):
         if not (product_details_doc or vendor_products or product_variants):
             print(f"No detailed data found for semicon_part_number: {product.semicon_part_number}")
             return {
-                "error": False,
+                "success": True,
                 "message": "Product retrieved successfully",
                 "data": {
                     "id": str(product.id),
@@ -611,14 +611,7 @@ async def get_semicon_productsall(
             )
 
         if not products:
-            return {
-                "status": "success",
-                "page": page,
-                "limit": limit,
-                "total_products": total_count,
-                "total_pages": (total_count + limit - 1) // limit,
-                "data": []
-            }
+            raise HTTPException(status_code=404, detail="No products found")
 
         # Get unique category IDs
         category_ids = list({p.semicon_category_id for p in products})
@@ -640,7 +633,7 @@ async def get_semicon_productsall(
             })
 
         return {
-            "status": "success",
+            "success": True,
             "message": "Products retrieved successfully",
             "data": {
                 "page": page,
@@ -670,7 +663,7 @@ async def get_top_products():
 
         top_products = analytics_data.get("data", {}).get("topProducts", [])[:6]
         if not top_products:
-            return {"success": True, "message": "No top products found", "data": []}
+            raise HTTPException(status_code=404, detail="No top products found")
 
         # 2. Extract product_ids
         product_ids = [p["product_id"] for p in top_products]
@@ -681,7 +674,7 @@ async def get_top_products():
             SemiconProduct.semicon_part_number.in_(product_ids)
         )
         if not products:
-            return {"success": True, "message": "No products found", "data": []}
+            raise HTTPException(status_code=404, detail="No products found")
 
         # Build category map
         category_ids = list({p.semicon_category_id for p in products})
@@ -735,7 +728,7 @@ async def get_semicon_products(
     )
 
     if not products:
-        return {"status": "success", "data": []}
+        raise HTTPException(status_code=404, detail="No products found")
 
     # Get unique category IDs
     category_ids = list({p.semicon_category_id for p in products})
@@ -754,7 +747,7 @@ async def get_semicon_products(
             # "child_category_name": child_category_map.get(p.semicon_child_category_id)
         })
 
-    return {"status": "success", "data": result}
+    return {"success": True, "data": result}
 @router.get("/quantity-price/check/{semicon_part_number:path}/{quantity}")
 async def check_product_availability(
     semicon_part_number: str,
