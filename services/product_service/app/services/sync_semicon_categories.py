@@ -1,5 +1,5 @@
 from app.models.categories_models import SemiconCategory, SemiconChildCategory
-from app.database import engine
+from app.middleware.database import engine
 from datetime import datetime, timezone
 from uuid import uuid4
 import logging

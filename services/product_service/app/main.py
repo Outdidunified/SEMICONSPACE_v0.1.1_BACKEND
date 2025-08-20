@@ -5,12 +5,13 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import asyncio
-import logging
+from app.utils.logging_config import setup_logging, get_logger
 from fastapi.staticfiles import StaticFiles
-from app.database import client
+from app.middleware.database import client
 #from app.job.digikey import save_digikey_product_to_db
-from app.kafka.kafka_producer import start_kafka, stop_kafka
-from app.kafka.kafka_consumer import start_consumer
+from app.jobs.kafka.kafka_producer import start_kafka, stop_kafka
+from app.jobs.kafka.kafka_consumer import start_consumer
+from app.middleware import errorhandel
 
 # Routers
 from app.routes.products_route import router as products_router
@@ -18,10 +19,11 @@ from app.routes.categories_route import router as categories_router
 # from app.routes.pricing_route import router as pricing_router
 # from app.routes.specification_route import router as specification_route
 from app.routes.manufacturer_route import router as manufacturer_route
-from app.autogenerate import initialize_counters
+from app.utils.autogenerate import initialize_counters
+from app.services.indexes import create_indexes
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+setup_logging()
+logger = get_logger(__name__)
 
 
 
@@ -49,11 +51,19 @@ async def lifespan(app: FastAPI):
             logger.warning("⏳ MongoDB not ready, retrying in 3s...", exc_info=True)
             await asyncio.sleep(3)
 
-    consumer_task = asyncio.create_task(start_consumer())
+    from typing import Coroutine, Any, cast
+    consumer_task: asyncio.Task[None] = asyncio.create_task(cast(Coroutine[Any, Any, None], start_consumer()))
     logger.info("🎧 Kafka consumer task launched")
 
     await initialize_counters()
     print("✅ Counters initialized")
+
+    # Create indexes in background (non-blocking)
+    try:
+        asyncio.create_task(create_indexes())
+        logger.info("🧱 Index creation task launched")
+    except Exception:
+        logger.warning("Failed to launch index creation task", exc_info=True)
 
     #await save_digikey_product_to_db()
 
@@ -69,6 +79,13 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
+# Register request/response logging middleware
+from app.middleware.request_logging import register_request_logging
+register_request_logging(app)
+
+# Register simple rate-limiter middleware (per-IP)
+from app.middleware.rate_limiter import register_rate_limiter
+register_rate_limiter(app)
 
 app.add_middleware(
     CORSMiddleware,
@@ -78,50 +95,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-#app.mount("/static", StaticFiles(directory="static"), name="static")
-@app.exception_handler(StarletteHTTPException)
-async def http_exception_handler(request: Request, exc: StarletteHTTPException):
-    # If it's a 200 "failure" response, return it as-is
-    if exc.status_code == 200 and isinstance(exc.detail, dict):
-        return JSONResponse(
-            status_code=200,
-            content=exc.detail
-        )
-
-    # Default error wrapper
-    return JSONResponse(
-        status_code=exc.status_code,
-        content={
-            "Error": "true",
-            "status_code": exc.status_code,
-            "message": exc.detail
-        }
-    )
-
-@app.exception_handler(RequestValidationError)
-async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    errors = exc.errors()
-    message = "; ".join([f"{e['loc'][-1]}: {e['msg']}" for e in errors])
-    return JSONResponse(
-        status_code=422,
-        content={
-            "Error": "true",
-            "status_code": 422,
-            "message": message
-        }
-    )
-
-@app.exception_handler(Exception)
-async def generic_exception_handler(request: Request, exc: Exception):
-    return JSONResponse(
-        status_code=500,
-        content={
-            "Error": "true",
-            "status_code": 500,
-            "message": "Internal Server Error"
-        }
-    )
-
+# -----------------------------
 app.include_router(products_router)
 app.include_router(categories_router)
 app.include_router(manufacturer_route)
+
+errorhandel.register_exception_handlers(app)

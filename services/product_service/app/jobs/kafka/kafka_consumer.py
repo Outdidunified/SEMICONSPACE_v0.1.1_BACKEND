@@ -1,12 +1,12 @@
 import asyncio
 import json
-import logging
+from app.utils.logging_config import get_logger
 from typing import Dict, Any, List
 from aiokafka import AIOKafkaConsumer
-from app.database import engine
+from app.middleware.database import engine
 from app.models.semicon_products import SemiconProduct
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 KAFKA_BOOTSTRAP_SERVERS = "172.235.17.60:9092"
 KAFKA_TOPIC = "payment.success"
@@ -44,7 +44,7 @@ async def reduce_stock_for_items(items: List[Dict[str, Any]]):
         await engine.save(product)
         logger.info(f"✅ Product {product_id} stock reduced by {qty}. New quantity = {product.quantity_available}")
 
-async def start_consumer():
+async def start_consumer() -> None:
     consumer = AIOKafkaConsumer(
         KAFKA_TOPIC,
         bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS,

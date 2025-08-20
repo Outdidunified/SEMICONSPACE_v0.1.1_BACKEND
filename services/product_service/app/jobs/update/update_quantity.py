@@ -1,7 +1,7 @@
 import logging
 from typing import Dict, Any
 from app.models.semicon_products import SemiconProduct
-from app.database import engine
+from app.middleware.database import engine
 
 logger = logging.getLogger(__name__)
 

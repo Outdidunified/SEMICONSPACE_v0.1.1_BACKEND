@@ -5,7 +5,8 @@ from app.models.product_varianants import VendorProduct as SemiconProductVariant
 from app.models.variant_pricing_models import SemiconProductVariantPricing
 from app.models.vendors_product_variant_parameters import VendorProductVariantParameter
 from app.models.vendor_product_variants_models import VendorProduct as VendorProductModel
-from app.database import engine
+from app.middleware.database import engine
+from bson import ObjectId
 
 
 async def initialize_counters():
@@ -19,7 +20,7 @@ async def initialize_counters():
             counter.value = max_id
             await engine.save(counter)
         else:
-            await engine.save(Counter(name=name, value=max_id))
+            await engine.save(Counter(id=str(ObjectId()),name=name, value=max_id))
 
     # category
     await set_initial("category", await engine.find(SemiconCategory), "semicon_category_id")

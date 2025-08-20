@@ -1,7 +1,7 @@
 import httpx
 import logging
 from app.models.manufacturers_models import SemiconManufacturer
-from app.database import engine
+from app.middleware.database import engine
 from datetime import datetime
 import uuid
 import traceback
@@ -85,8 +85,10 @@ async def fetch_and_sync_semicon_manufacturers() -> dict:
 
     return {
         "status": "success",
-        "added_count": added_count,
-        "updated_count": updated_count,
-        "message": f"✅ Added {added_count}, Updated {updated_count} manufacturers",
-        "saved_count": added_count + updated_count
+        "data": {
+            "added_count": added_count,
+            "updated_count": updated_count,
+            "message": f"✅ Added {added_count}, Updated {updated_count} manufacturers",
+            "saved_count": added_count + updated_count
+        }
     }

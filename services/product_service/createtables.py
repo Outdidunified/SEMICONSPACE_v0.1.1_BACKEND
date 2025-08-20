@@ -1,5 +1,5 @@
 import asyncio
-from app.database import client  
+from app.middleware.database import client  
 db = client["product_service"]  
 
 async def create_collections():
