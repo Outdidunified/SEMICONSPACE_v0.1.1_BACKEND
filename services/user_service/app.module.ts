@@ -9,8 +9,9 @@ import { ProfileModule } from './src/modules/profile/profile.module';
 import { AddressModule } from './src/modules/address/address.module';
 import { RoleModule } from './src/modules/role/role.module';
 import { ManageUserModule } from './src/modules/manage_users/manage-user.module';
+import { PermissionModule } from './src/modules/permissions/permission.module';
+
 import { ConsumerService } from './src/kafka/consumer.service';
-// import { RateLimiterMiddleware } from './src/middlewares/rateLimiter';
 import { sequelizeConfig } from './src/config/db';
 
 @Module({
@@ -20,6 +21,7 @@ import { sequelizeConfig } from './src/config/db';
     AddressModule,
     RoleModule,
     ManageUserModule,
+    PermissionModule, // <-- Added here
   ],
   providers: [ConsumerService],
 })
