@@ -1,6 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 import uuid
+import asyncio
 from typing import List, Optional
 
 from app.models.categories_models import SemiconCategory, SemiconChildCategory
@@ -14,7 +15,7 @@ from app.models.variant_pricing_models import SemiconProductVariantPricing, Pric
 from app.models.vendors_product_variant_parameters import VendorProductVariantParameter
 from app.models.product_varianants import VendorProduct as VendorProductVariant, Supplier as VariantSupplier
 from app.models.vendor_product_variants_models import VendorProduct, Parameter as VariantParameter
-from app.counter import (
+from app.utils.counter import (
     get_next_category_counter,
     get_next_manufacturer_counter,
     get_next_variant_counter,
@@ -22,8 +23,8 @@ from app.counter import (
     get_next_parameter_counter,
     get_vendor_id
 )
-from app.database import engine
-from app.kafka.kafka_producer import send_event
+from app.middleware.database import engine
+from app.jobs.kafka.kafka_producer import send_event
 
 async def gather_full_product_data(db, listing_product, details, vendor_product):
     listing_dict = listing_product.dict()
@@ -287,39 +288,42 @@ async def fetch_and_sync_semicon_product(digikey_data: dict):
     # Set to track unique parameters (based on ParameterId, ValueId, ValueText)
     unique_params = set()
 
-    for variation in digikey_data.get("productVariations", []):
+    # Pre-generate counters to reduce awaits inside the loop
+    variations = digikey_data.get("productVariations", [])
+
+    # Process parameters once (shared across variants)
+    if not all_parameters:
+        param_docs = []
+        for param in digikey_data.get("parameters", []):
+            spara_id = f"SPARAID-{await get_next_parameter_counter()}"
+            param_docs.append((spara_id, param))
+        # Save parameter docs concurrently
+        async def build_and_save_param(spara_id: str, param: dict):
+            param_doc = VendorProductVariantParameter(
+                semicon_parameter_id=spara_id,
+                digikey_parameter_id=param.get("ParameterId"),
+                parameter_text=param.get("ParameterText") or "Unknown",
+                parameter_type="ParameterType",
+                created_by="admin",
+                modified_by="admin",
+                status=True
+            )
+            await db.save(param_doc)
+            param_key = (param.get("ParameterId"), str(param.get("ValueId", "")), param.get("ValueText") or "Unknown")
+            if param_key not in unique_params:
+                unique_params.add(param_key)
+                all_parameters.append(VariantParameter(
+                    parameter_id=spara_id,
+                    value_id=str(param.get("ValueId", "")),
+                    value_text=param.get("ValueText") or "Unknown"
+                ))
+        await asyncio.gather(*(build_and_save_param(pid, p) for pid, p in param_docs))
+
+    async def process_variation(variation: dict):
         variant_id = f"SPVID-{await get_next_variant_counter()}"
         vendor_part_number = variation.get("digiKeyPartNumber") or variation.get("DigiKeyProductNumber") or variation.get("productNumber") or "UNKNOWN"
         supplier_id, supplier_name = parse_manufacturer(variation.get("Supplier") or digikey_data.get("Manufacturer"))
-
-        # Process parameters only once for the first variant, as they are shared
-        if not all_parameters:  # Only process parameters if not already populated
-            for param in digikey_data.get("parameters", []):  # Use top-level parameters
-                spara_id = f"SPARAID-{await get_next_parameter_counter()}"
-                # Save parameter doc
-                param_doc = VendorProductVariantParameter(
-                    semicon_parameter_id=spara_id,
-                    digikey_parameter_id=param.get("ParameterId"),
-                    parameter_text=param.get("ParameterText") or "Unknown",
-                    parameter_type="ParameterType",
-                    created_by="admin",
-                    modified_by="admin",
-                    status=True
-                )
-                await db.save(param_doc)
-
-                # Create parameter for vendor_product
-                param_key = (param.get("ParameterId"), str(param.get("ValueId", "")), param.get("ValueText") or "Unknown")
-                if param_key not in unique_params:
-                    unique_params.add(param_key)
-                    variant_param = VariantParameter(
-                        parameter_id=spara_id,
-                        value_id=str(param.get("ValueId", "")),
-                        value_text=param.get("ValueText") or "Unknown"
-                    )
-                    all_parameters.append(variant_param)
         package_type = (variation.get("PackageType") or {}).get("Name") or "Unknown"
-        # Save variant with no parameters (as per new model, parameters are in VendorProduct)
         variant_doc = VendorProductVariant(
             id=uuid.uuid4(),
             semicon_product_variant_id=variant_id,
@@ -338,12 +342,8 @@ async def fetch_and_sync_semicon_product(digikey_data: dict):
             package_type=package_type,
             semicon_product_variant_pricing_id=[]
         )
-
-        # Create pricing for variant (as in old logic)
         spvpid = f"SPVPID-{await get_next_pricing_counter()}"
-        
         pricing_doc = SemiconProductVariantPricing(
-            #package_type=package_type,
             minimum_order_quantity=variation.get("MinimumOrderQuantity", 0),
             pricing=[PricingTier(**p) for p in variation.get("StandardPricing", [])],
             created_by="admin",
@@ -355,8 +355,10 @@ async def fetch_and_sync_semicon_product(digikey_data: dict):
         await db.save(pricing_doc)
         variant_doc.semicon_product_variant_pricing_id.append(spvpid)
         await db.save(variant_doc)
+        return variant_id
 
-        variant_ids.append(variant_id)
+    # Process all variations concurrently
+    variant_ids = await asyncio.gather(*(process_variation(v) for v in variations))
 
     # Assign collected parameters to vendor_product
     vendor_product.parameters = all_parameters
@@ -380,6 +382,6 @@ async def fetch_and_sync_semicon_product(digikey_data: dict):
         "manufacturer_part_number": listing_product.manufacturerPartNumber
     }
 
-    await send_event(topic="product.added", value=all_data_dict)
+    await send_event(topic="product.addedq", value=all_data_dict)
    
     return listing_product

@@ -1,7 +1,7 @@
 import os
 import json
 import asyncio
-import logging
+from app.utils.logging_config import get_logger
 from typing import Optional
 from aiokafka import AIOKafkaProducer
 from dotenv import load_dotenv
@@ -9,7 +9,7 @@ from datetime import datetime
 from uuid import UUID
 
 load_dotenv()
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "")
 

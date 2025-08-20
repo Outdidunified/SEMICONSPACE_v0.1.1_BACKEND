@@ -17,6 +17,7 @@ class SemiconManufacturer(Model):
     status: Union[bool, str] = Field(default=True)
 
     model_config = {
-        "collection": "manufacturers"
+        "collection": "manufacturers",
+        "arbitrary_types_allowed": True
     }
 
