@@ -563,7 +563,6 @@ async def get_all_counts():
             detail=f"Error fetching counts: {str(e)}",
         )
     
-
 @router.get("/fetch/all-products")
 async def get_semicon_productsall(
     category_id: Optional[str] = Query(None),
