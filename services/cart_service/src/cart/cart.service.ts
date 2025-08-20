@@ -1,6 +1,7 @@
 // cart.service.ts
 import { Injectable, Inject } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { ConfigService } from '@nestjs/config';
 import { Repository, DeepPartial } from 'typeorm';
 import { CartItem } from './cart-item.entity';
 import { RedisService } from '../redis/redis.service';
@@ -18,6 +19,7 @@ export class CartService {
     private readonly cartRepository: Repository<CartItem>,
     private readonly redisService: RedisService,
     private readonly httpService: HttpService,
+    private readonly configService: ConfigService,  // 👈 add this
     @Inject('KAFKA_SERVICE')
     private readonly kafkaClient: ClientKafka,
   ) {}
@@ -65,7 +67,16 @@ export class CartService {
         return await this.handleRemoveFromCart(userId, productId, packageType);
       }
 
-      const externalUrl = `http://192.168.1.14:8001/product/quantity-price/check/${productId}/${quantity}`; // expects packaging_breakdown and total_price
+      let baseUrl = this.configService.get<string>('PRODUCT_SERVICE_URL');
+      if (!baseUrl || baseUrl.includes('${')) {
+        const host = this.configService.get<string>('PRODUCT_SERVICE_HOST');
+        const port = this.configService.get<string>('PRODUCT_SERVICE_PORT');
+        baseUrl = `http://${host}:${port}`;
+      }
+      baseUrl = baseUrl.replace(/\/+$/, '');
+
+      const externalUrl = `${baseUrl}/product/quantity-price/check/${productId}/${quantity}`; // expects packaging_breakdown and total_price
+      // console.log(`🌍 Fetching product details from: ${externalUrl}`);
     
       
       let response;
@@ -81,7 +92,7 @@ export class CartService {
             }),
           ),
         );
-          console.log('🌍 External API Response:', JSON.stringify(response.data, null, 2));
+          // console.log('🌍 External API Response:', JSON.stringify(response.data, null, 2));
 
       } catch (error: any) {
         return this.respond(500, 'Failed to fetch product details');
