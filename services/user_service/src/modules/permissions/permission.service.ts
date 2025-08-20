@@ -24,39 +24,53 @@ export class PermissionService {
   }
 
   async assignBulkPermissions(dto: BulkPermissionDto) {
-    const results = [];
+  const results = [];
 
-    for (const p of dto.permissions) {
-      const existing = await this.permissionModel.findOne({
-        where: { role_id: dto.role_id, module: p.module, sub_module: p.sub_module },
-      });
+  for (const p of dto.permissions) {
+    const where: any = { role_id: dto.role_id, module: p.module };
 
-      if (existing) {
-        await existing.update(p);
-        results.push({ action: 'updated', permission: existing });
-      } else {
-        const newPerm = await this.permissionModel.create({ ...p, role_id: dto.role_id });
-        results.push({ action: 'created', permission: newPerm });
-      }
+    if (p.sub_module) {
+      where.sub_module = p.sub_module; // only add if provided
     }
 
-    return {
-      statusCode: HttpStatus.OK,
-      success: false,
-      message: 'Permissions assigned/updated successfully',
-      data: results,
-    };
+    const existing = await this.permissionModel.findOne({ where });
+
+    if (existing) {
+      await existing.update(p);
+      results.push({ action: 'updated', permission: existing });
+    } else {
+      const newPerm = await this.permissionModel.create({ ...p, role_id: dto.role_id });
+      results.push({ action: 'created', permission: newPerm });
+    }
   }
 
-  async findByRole(roleId: number) {
-  const permissions = await this.permissionModel.findAll({ where: { role_id: roleId } });
+  return {
+    statusCode: HttpStatus.OK,
+    success: true,
+    message: 'Permissions assigned/updated successfully',
+    data: results,
+  };
+}
+
+
+async findByRole(roleId: number) {
+  const permissions = await this.permissionModel.findAll({
+    where: { role_id: roleId },
+  });
 
   // Only keep permissions that exist in MODULES
   const filteredPermissions = permissions.filter((p) =>
-    MODULES.some((m) =>
-      m.module === p.module &&
-      m.submodules.some((s) => s.name === p.sub_module)
-    )
+    MODULES.some((m) => {
+      if (m.module !== p.module) return false;
+
+      // If submodules exist, check inside
+      if (Array.isArray(m.submodules)) {
+        return m.submodules.some((s) => s.name === p.sub_module);
+      }
+
+      // If module has no submodules, match by module only
+      return true;
+    })
   );
 
   return {
@@ -66,6 +80,7 @@ export class PermissionService {
     data: filteredPermissions,
   };
 }
+
 
 
  async update(permissionId: string, dto: UpdatePermissionDto) {

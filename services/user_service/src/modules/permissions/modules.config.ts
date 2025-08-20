@@ -2,9 +2,7 @@
 export const MODULES = [
   {
     module: "dashboard",
-    submodules: [
-      { name: "view_dashboard", actions: ["view"] }
-    ]
+    actions: ["create", "view", "update", "delete"] // dashboard has direct actions
   },
   {
     module: "catalogue_management",
