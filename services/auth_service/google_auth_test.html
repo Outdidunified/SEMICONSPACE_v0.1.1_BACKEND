@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Sign In</title>
+  <!-- Google Identity Services for ID token -->
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <style>
+    /* Minimal inline styles to resemble the provided screenshot (no external CSS) */
+    :root {
+      --primary: #13294b; /* Dark navy button */
+      --bg: #ffffff;
+      --muted: #6b7280; /* gray-500 */
+      --border: #e5e7eb; /* gray-200 */
+      --input-bg: #eef2ff; /* light indigo hint */
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; background: var(--bg); }
+    .container { max-width: 460px; margin: 40px auto; padding: 0 16px; }
+    h1 { margin: 0 0 8px; font-size: 28px; color: #0f172a; text-align: center; }
+    p.sub { margin: 0 0 24px; color: var(--muted); text-align: center; }
+
+    label { display: block; font-weight: 600; margin: 16px 0 8px; color: #111827; }
+    input { width: 100%; padding: 14px 12px; border-radius: 10px; border: 1px solid var(--border); background: #f6f7fb; font-size: 15px; }
+    input::placeholder { color: #94a3b8; }
+
+    .btn { width: 100%; padding: 14px 16px; border: 0; border-radius: 10px; cursor: pointer; font-weight: 600; font-size: 15px; }
+    .btn-primary { background: var(--primary); color: #fff; }
+    .btn-ghost { background: #f3f4f6; color: #111827; }
+    .center { text-align: center; }
+    .muted { color: var(--muted); }
+
+    .divider { display: flex; align-items: center; gap: 12px; margin: 18px 0; }
+    .divider .line { flex: 1; height: 1px; background: var(--border); }
+
+    .google-btn { display: inline-flex; align-items: center; gap: 8px; justify-content: center; width: 100%; padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; background: #fff; cursor: pointer; font-weight: 600; }
+    .google-btn img { width: 18px; height: 18px; }
+
+    .helper { margin-top: 12px; }
+    .helper a { color: #0f172a; text-decoration: none; }
+
+    .response { margin-top: 24px; border: 1px solid var(--border); border-radius: 10px; padding: 12px; background: #0b1021; color: #e6e6e6; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 13px; overflow: auto; }
+
+    /* Hidden panels (Register + Google Register extra fields) */
+    .hidden { display: none; }
+    .panel { border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin-top: 16px; background: #fff; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Sign In to Your Account</h1>
+    <p class="sub">Enter your detail below</p>
+
+    <!-- Email/Password Sign In -->
+    <form id="login-form" class="form" onsubmit="return handleLogin(event)">
+      <label for="email">Email</label>
+      <input id="email" type="email" placeholder="anish@semiconspace.com" required />
+
+      <label for="password" style="margin-top: 12px;">Password</label>
+      <input id="password" type="password" placeholder="••••••••" required />
+
+      <div style="margin-top: 16px;">
+        <button class="btn btn-primary" type="submit">Sign in to account</button>
+      </div>
+    </form>
+
+    <div class="center helper">
+      <a href="#" onclick="alert('Implement your Forgot Password page route'); return false;" class="muted">Forget your password?</a>
+    </div>
+
+    <div class="divider">
+      <div class="line"></div>
+      <div class="muted">Or</div>
+      <div class="line"></div>
+    </div>
+
+    <!-- Google Sign In Button will render here (initialized by backend-provided client ID) -->
+    <div id="googleButton"></div>
+    <div class="center muted" style="margin-top:8px;">If the button doesn’t appear, refresh the page.</div>
+
+    <!-- Google Register extra fields (shown only when registering with Google) -->
+    <div id="google-register-panel" class="panel hidden">
+      <label for="gphone">Phone (for register)</label>
+      <input id="gphone" placeholder="9876543210" />
+
+      <label for="grole">Role ID (for register)</label>
+      <input id="grole" type="number" value="2" />
+
+      <div style="margin-top: 12px; display: flex; gap: 8px;">
+        <button class="btn btn-primary" type="button" onclick="googleRegister()">Register with Google</button>
+        <button class="btn btn-ghost" type="button" onclick="hideGoogleRegister()">Cancel</button>
+      </div>
+    </div>
+
+    <div class="center helper">
+      <span class="muted">Don't have an account? </span>
+      <a href="#" onclick="toggleRegister(true); return false;">Sign Up Now!</a>
+    </div>
+
+    <!-- Standard Registration Panel -->
+    <div id="register-panel" class="panel hidden">
+      <form id="register-form" onsubmit="return handleRegister(event)">
+        <label for="rfirst">First Name</label>
+        <input id="rfirst" required />
+
+        <label for="rlast">Last Name</label>
+        <input id="rlast" required />
+
+        <label for="remail">Email</label>
+        <input id="remail" type="email" required />
+
+        <label for="rphone">Phone</label>
+        <input id="rphone" required />
+
+        <label for="rpass">Password</label>
+        <input id="rpass" type="password" required />
+
+        <label for="rrole">Role ID</label>
+        <input id="rrole" type="number" value="2" required />
+
+        <div style="margin-top: 12px; display: flex; gap: 8px;">
+          <button class="btn btn-primary" type="submit">Create account</button>
+          <button class="btn btn-ghost" type="button" onclick="toggleRegister(false)">Cancel</button>
+        </div>
+      </form>
+    </div>
+
+    <!-- Response Box -->
+    <div class="response" id="out">(waiting)</div>
+  </div>
+
+  <script>
+    // ====== Config ======
+    // Fixed API base for local backend
+    const API_BASE = 'http://localhost:8000';
+
+    // Google Client ID will be fetched from backend
+    let GOOGLE_CLIENT_ID = null;
+
+    // ====== Basic helpers ======
+    const out = document.getElementById('out');
+    function setOut(obj) {
+      out.textContent = typeof obj === 'string' ? obj : JSON.stringify(obj, null, 2);
+    }
+
+    function toggleRegister(show) {
+      document.getElementById('register-panel').classList.toggle('hidden', !show);
+      if (show) {
+        const emailVal = (document.getElementById('email').value || '').trim();
+        if (emailVal) document.getElementById('remail').value = emailVal;
+      }
+    }
+
+    function showGoogleRegister() {
+      document.getElementById('google-register-panel').classList.remove('hidden');
+    }
+    function hideGoogleRegister() {
+      document.getElementById('google-register-panel').classList.add('hidden');
+    }
+
+    // ====== Google Identity Services ======
+    let latestIdToken = null;
+    let gisInitialized = false;
+
+    // Initialize GIS after fetching client ID from backend
+    async function initGoogle() {
+      try {
+        const res = await fetch(`${API_BASE}/auth/google/config`);
+        const cfg = await res.json();
+        if (!res.ok || !cfg.client_id) throw new Error('No client_id from backend');
+        GOOGLE_CLIENT_ID = cfg.client_id;
+
+        // Initialize the Google Identity Services client
+        google.accounts.id.initialize({
+          client_id: GOOGLE_CLIENT_ID,
+          callback: handleGoogleCredentialResponse,
+          auto_select: false
+        });
+        // Render the button inside #googleButton
+        google.accounts.id.renderButton(document.getElementById('googleButton'), {
+          type: 'standard',
+          size: 'large',
+          theme: 'outline',
+          text: 'sign_in_with',
+          shape: 'rect',
+          logo_alignment: 'left'
+        });
+        gisInitialized = true;
+      } catch (e) {
+        setOut({ error: 'Failed to init Google button', details: e?.message || String(e) });
+      }
+    }
+
+    // Handle GIS callback for sign-in
+    function handleGoogleCredentialResponse(resp) {
+      latestIdToken = resp && resp.credential ? resp.credential : null;
+      if (!latestIdToken) {
+        setOut('No Google token received.');
+        showGoogleRegister();
+        return;
+      }
+      setOut({ info: 'Google ID token received' });
+      // Auto-attempt backend login
+      googleLoginWithToken();
+    }
+
+    async function googleLoginWithToken() {
+      if (!latestIdToken) {
+        setOut('No token to login with.');
+        return;
+      }
+      try {
+        const res = await fetch(`${API_BASE}/auth/google/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id_token: latestIdToken })
+        });
+        const data = await res.json();
+        setOut({ status: res.status, data });
+        if (res.status === 404) {
+          // Not registered yet — show Google register fields
+          showGoogleRegister();
+        }
+      } catch (e) {
+        setOut({ error: e?.message || String(e) });
+      }
+    }
+
+    async function googleRegister() {
+      if (!latestIdToken) return setOut('Get Google token first by clicking "Sign In with Google"');
+      const phone = document.getElementById('gphone').value.trim();
+      const roleId = parseInt(document.getElementById('grole').value, 10);
+      if (!phone) return alert('Enter phone');
+      if (!roleId) return alert('Enter role_id');
+      try {
+        const res = await fetch(`${API_BASE}/auth/google/register`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id_token: latestIdToken, phone, role_id: roleId })
+        });
+        const data = await res.json();
+        setOut({ status: res.status, data });
+        if (res.ok) hideGoogleRegister();
+      } catch (e) {
+        setOut({ error: e?.message || String(e) });
+      }
+    }
+
+    // ====== Email/Password Login ======
+    async function handleLogin(ev) {
+      ev.preventDefault();
+      const email = document.getElementById('email').value.trim();
+      const password = document.getElementById('password').value;
+      try {
+        const res = await fetch(`${API_BASE}/auth/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ identifier: email, password })
+        });
+        const data = await res.json();
+        setOut({ status: res.status, data });
+      } catch (e) {
+        setOut({ error: e?.message || String(e) });
+      }
+      return false;
+    }
+
+    // ====== Standard Registration ======
+    async function handleRegister(ev) {
+      ev.preventDefault();
+      const payload = {
+        first_name: document.getElementById('rfirst').value.trim(),
+        last_name: document.getElementById('rlast').value.trim(),
+        email: document.getElementById('remail').value.trim(),
+        phone: document.getElementById('rphone').value.trim(),
+        password: document.getElementById('rpass').value,
+        role_id: parseInt(document.getElementById('rrole').value, 10),
+      };
+      try {
+        const res = await fetch(`${API_BASE}/auth/register`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        setOut({ status: res.status, data });
+        if (res.ok) toggleRegister(false);
+      } catch (e) {
+        setOut({ error: e?.message || String(e) });
+      }
+      return false;
+    }
+    // Start Google init once the GIS script has loaded
+    window.addEventListener('DOMContentLoaded', () => {
+      if (window.google && window.google.accounts && window.google.accounts.id) {
+        initGoogle();
+      } else {
+        // If GIS script loads async, wait a bit and retry
+        const i = setInterval(() => {
+          if (window.google && window.google.accounts && window.google.accounts.id) {
+            clearInterval(i);
+            initGoogle();
+          }
+        }, 200);
+        setTimeout(() => clearInterval(i), 5000);
+      }
+    });
+  </script>
+</body>
+</html>

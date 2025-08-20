@@ -33,6 +33,10 @@ app.include_router(register_router)
 app.include_router(login_router)
 app.include_router(admin_login_router)
 
+# Google auth routes
+from app.routes.google_auth import router as google_auth_router
+app.include_router(google_auth_router)
+
 # ---------------- Exception Handlers ---------------- #
 errorhandel.register_exception_handlers(app)
 

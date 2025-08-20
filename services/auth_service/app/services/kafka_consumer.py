@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 KAFKA_BOOTSTRAP_SERVERS = "172.235.17.60:9092"
 KAFKA_GROUP_ID = "user-events-group"
-TOPICS = ["user.created", "user.status.updated", "user.phone.updated","user.password.updated"]
+TOPICS = ["user.created", "user.registered", "user.status.updated", "user.phone.updated", "user.password.updated"]
 
 # -----------------------------
 # Core Kafka consume loop
@@ -35,18 +35,25 @@ async def consume():
         async for msg in consumer:
             topic = msg.topic
             payload = msg.value
-            if payload is None or not isinstance(payload, dict) or not payload.get("success") or not payload.get("data"):
+            if payload is None or not isinstance(payload, dict):
                 logger.warning(f"⚠️ Invalid message in {topic}: {payload}")
                 continue
 
-            data = payload["data"]
+            # Accept both shapes: wrapped {success, data} and flat payloads
+            if payload.get("data") is not None:
+                data = payload["data"]
+                if not payload.get("success"):
+                    logger.warning(f"⚠️ Message marked unsuccessful in {topic}: {payload}")
+                    continue
+            else:
+                data = payload
             user_id = data.get("userId")
             if not user_id:
                 logger.error(f"Missing userId in {topic} event: {data}")
                 continue
 
             try:
-                if topic == "user.created":
+                if topic in ("user.created", "user.registered"):
                     await handle_user_created(data)
                 elif topic == "user.status.updated":
                     await handle_user_status_updated(data)
