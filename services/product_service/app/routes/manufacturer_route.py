@@ -22,7 +22,7 @@ async def sync_semicon_manufacturers():
         result = await fetch_and_sync_semicon_manufacturers()
         if result["status"] == "success":
             return {
-                "status": "success",
+                "success": True,
                 "message": f"Synced {result.get('saved_count', 0)} manufacturers successfully",
                 "data": result
             }
@@ -63,7 +63,7 @@ async def get_all_manufacturersall():
         cleaned_data = [transform_mongo_doc(doc) for doc in raw_data]
 
         return {
-            "status": "success",
+            "success": True,
             "message": "Manufacturers fetched successfully",
             "data": jsonable_encoder(cleaned_data)
         }
@@ -82,7 +82,7 @@ async def get_all_manufacturersall():
                     logger.warning(f"Skipping invalid manufacturer document: {inner_e}")
 
             return {
-                "status": "success",
+                "success": True,
                 "message": "Manufacturers fetched successfully (some invalid documents skipped)",
                 "data": jsonable_encoder(cleaned_data)
             }
@@ -93,23 +93,29 @@ async def get_all_manufacturersall():
 @router.get("/manufacturer/all/index", tags=["Semicon Manufacturer"])
 async def get_all_manufacturers(
     page: int = Query(1, ge=1, description="Page number"),
-    skip: int = Query(0, ge=0, description="Number of records to skip"),
-    limit: int = Query(100, ge=1, le=1000, description="Maximum number of records to return")
+    limit: int = Query(100, ge=1, le=1000, description="Maximum number of records to return"),
 ):
     """
     Get all manufacturers with pagination and standardized response format
     """
     try:
+        skip = (page - 1) * limit  # ✅ calculate skip dynamically
+
         raw_data = await engine.find(SemiconManufacturer, skip=skip, limit=limit)
         cleaned_data = [transform_mongo_doc(doc) for doc in raw_data]
         total_count = await engine.count(SemiconManufacturer)
 
         return {
-            "status": "success",
+            "success": True,
             "message": "Manufacturers fetched successfully",
             "data": {
                 "manufacturers": jsonable_encoder(cleaned_data),
-                "pagination": {"total": total_count, "skip": skip, "limit": limit}
+                "pagination": {
+                    "total": total_count,
+                    "page": page,
+                    "limit": limit,
+                    "pages": (total_count + limit - 1) // limit  # total pages
+                }
             }
         }
     except HTTPException:
@@ -117,7 +123,7 @@ async def get_all_manufacturers(
     except Exception as e:
         logger.error(f"Error fetching manufacturers: {str(e)}")
         try:
-            raw_docs = await engine.find(SemiconManufacturer, limit=limit, skip=skip)
+            raw_docs = await engine.find(SemiconManufacturer, skip=(page - 1) * limit, limit=limit)
             cleaned_data = []
             for doc in raw_docs:
                 try:
@@ -129,15 +135,21 @@ async def get_all_manufacturers(
             total_count = await engine.count(SemiconManufacturer)
 
             return {
-                "status": "success",
+                "success": True,
                 "message": "Manufacturers fetched successfully (some invalid documents skipped)",
                 "data": {
                     "manufacturers": jsonable_encoder(cleaned_data),
-                    "pagination": {"total": total_count, "skip": skip, "limit": limit}
+                    "pagination": {
+                        "total": total_count,
+                        "page": page,
+                        "limit": limit,
+                        "pages": (total_count + limit - 1) // limit
+                    }
                 }
             }
         except Exception as inner_e:
             raise HTTPException(status_code=500, detail=f"Failed to fetch manufacturers: {str(inner_e)}")
+
 
 
 # ---------------- Get Products Count by Manufacturer ----------------
@@ -155,7 +167,7 @@ async def get_products_count_by_manufacturer(manufacturer_id: str):
         )
 
         return {
-            "status": "success",
+            "success": True,
             "message": f"Counted {count} products for manufacturer '{manufacturer_id}'",
             "data": {"count": count}
         }
@@ -222,7 +234,7 @@ async def get_categories_by_manufacturer(
         total_count = count_doc[0]["total"] if count_doc else 0
 
         return {
-            "status": "success",
+            "success": True,
             "message": f"Found {len(results)} semicon categories for manufacturer '{manufacturer_id}'",
             "data": {
                 "categories": results,
@@ -249,7 +261,7 @@ async def get_manufacturer_counts():
             for m in manufacturers
         ]
         return {
-            "status": "success",
+            "success": True,
             "message": "Manufacturer counts retrieved successfully",
             "data": {"total_active_manufacturers": total_active_manufacturers, "manufacturers": manufacturers_data}
         }
@@ -307,7 +319,7 @@ async def get_products_by_manufacturer2(
         )
 
         return {
-            "status": "success",
+            "success": True,
             "message": f"Successfully retrieved {len(response_data)} products for manufacturer '{manufacturer_id}'",
             "data": {
                 "products": jsonable_encoder(response_data),
