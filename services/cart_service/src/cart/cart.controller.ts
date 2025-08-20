@@ -31,14 +31,15 @@ export class AddToCartDto {
   @Type(() => Number)
   quantity: number;
 
+  @IsOptional()
   @IsNumber()
   @Min(0)
   @Type(() => Number)
-  price: number;
+  price?: number; // optional; will be derived from product service if not provided
 
   @IsOptional()
   @IsString()
-  packageType?: string;
+  packageType?: string; // optional; will be derived from product service
 }
 
 @Controller('cart')
@@ -79,12 +80,13 @@ export class CartController {
     return result;
   }
 
-  @Delete('removecartitem/:userId/:productId')
+  @Delete('removecartitem/:userId/:productId/:packageType')
   async removeFromCart(
     @Param('userId') userId: string,
     @Param('productId') productIdParam: string,
+    @Param('packageType') packageType: string,
   ) {
-    const result = await this.cartService.handleRemoveFromCart(userId, productIdParam);
+    const result = await this.cartService.handleRemoveFromCart(userId, productIdParam, packageType);
     if ((result as any).success === false) {
       throw new HttpException(result, (result as any).statusCode || 400);
     }

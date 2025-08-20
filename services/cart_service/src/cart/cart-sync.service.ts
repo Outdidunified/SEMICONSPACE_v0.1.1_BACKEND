@@ -97,11 +97,11 @@ export class CartSyncService {
             const parsed = JSON.parse(jsonData as string);
             
             const productId = parsed.productId || parsed.semicon_part_number || parsed.id;
-            const quantity = parseInt(parsed.quantity, 10);
+            const baseQuantity = parseInt(parsed.quantity, 10);
 
-            if (!productId || isNaN(quantity) || quantity <= 0) {
+            if (!productId || isNaN(baseQuantity) || baseQuantity <= 0) {
               this.logger.warn(
-                `⚠️ Skipping item: Invalid productId (${productId}) or quantity (${quantity})`
+                `⚠️ Skipping item: Invalid productId (${productId}) or quantity (${baseQuantity})`
               );
               continue;
             }
@@ -116,7 +116,6 @@ export class CartSyncService {
             }
 
             // ✅ Additional safety: Check if this Redis entry is stale
-            // If the item has a very old modifiedDate compared to now, it might be stale
             const itemModifiedDate = parsed.modifiedDate ? new Date(parsed.modifiedDate) : null;
             const now = new Date();
             const hoursSinceModified = itemModifiedDate ? 
@@ -124,31 +123,86 @@ export class CartSyncService {
             
             if (itemModifiedDate && hoursSinceModified > 24) {
               this.logger.warn(`⚠️ Skipping potentially stale Redis entry for ${productId} (${hoursSinceModified.toFixed(1)} hours old)`);
-              // Optionally remove stale entries from Redis
               await redisClient.hDel(key, productIdStr);
               continue;
             }
 
-            const item: DeepPartial<CartItem> = {
-              userId,
-              productId,
-              quantity,
-              name: parsed.name || '',
-              price: parsed.price || 0,
-              description: parsed.description || '',
-              manufacturerName: parsed.manufacturerName || '',
-              manufacturerPartNumber: parsed.manufacturerPartNumber || '',
-              datasheetUrl: parsed.datasheetUrl || '',
-              imageUrl: parsed.imageUrl || '',
-              createdBy: userId,
-              modifiedBy: userId,
-              packageType: parsed.packageType || '',
-              createdDate: parsed.createdDate ? new Date(parsed.createdDate) : new Date(),
-              modifiedDate: new Date(),
-              status: parsed.status ?? true,
-            };
+            // Detect if this Redis entry is already split by package (field key like productId::packageType)
+            const [pidFromKey, pkgFromKeyRaw] = String(productIdStr).split('::');
+            const pkgFromKey = pkgFromKeyRaw ? pkgFromKeyRaw.trim() : undefined;
+            const productIdFinal = productId || pidFromKey;
+            const breakdown = Array.isArray(parsed.packagingBreakdown) ? parsed.packagingBreakdown : null;
 
-            items.push(item);
+            if (pkgFromKey) {
+              // Already split: push single row without re-expanding
+              const item: DeepPartial<CartItem> = {
+                userId,
+                productId: productIdFinal,
+                quantity: baseQuantity,
+                name: parsed.name || '',
+                price: parsed.price || 0, // extended total already stored per split
+                description: parsed.description || '',
+                manufacturerName: parsed.manufacturerName || '',
+                manufacturerPartNumber: parsed.manufacturerPartNumber || '',
+                datasheetUrl: parsed.datasheetUrl || '',
+                imageUrl: parsed.imageUrl || '',
+                createdBy: userId,
+                modifiedBy: userId,
+                packageType: (parsed.packageType || pkgFromKey || '').trim(),
+                createdDate: parsed.createdDate ? new Date(parsed.createdDate) : new Date(),
+                modifiedDate: new Date(),
+                status: parsed.status ?? true,
+              };
+              items.push(item);
+            } else if (breakdown && breakdown.length > 0) {
+              // Not split in key: expand into multiple rows, one per package split
+              for (const b of breakdown) {
+                const pkgType = (b?.package_type || parsed.packageType || '').trim();
+                const qty = typeof b?.quantity === 'number' ? b.quantity : baseQuantity;
+                const extended = typeof b?.extended_price === 'number' ? b.extended_price : (parsed.price || 0);
+
+                const item: DeepPartial<CartItem> = {
+                  userId,
+                  productId: productIdFinal,
+                  quantity: qty,
+                  name: parsed.name || '',
+                  price: extended, // store extended total for this split
+                  description: parsed.description || '',
+                  manufacturerName: parsed.manufacturerName || '',
+                  manufacturerPartNumber: parsed.manufacturerPartNumber || '',
+                  datasheetUrl: parsed.datasheetUrl || '',
+                  imageUrl: parsed.imageUrl || '',
+                  createdBy: userId,
+                  modifiedBy: userId,
+                  packageType: pkgType,
+                  createdDate: parsed.createdDate ? new Date(parsed.createdDate) : new Date(),
+                  modifiedDate: new Date(),
+                  status: parsed.status ?? true,
+                };
+                items.push(item);
+              }
+            } else {
+              // No breakdown: single row
+              const item: DeepPartial<CartItem> = {
+                userId,
+                productId: productIdFinal,
+                quantity: baseQuantity,
+                name: parsed.name || '',
+                price: parsed.price || 0,
+                description: parsed.description || '',
+                manufacturerName: parsed.manufacturerName || '',
+                manufacturerPartNumber: parsed.manufacturerPartNumber || '',
+                datasheetUrl: parsed.datasheetUrl || '',
+                imageUrl: parsed.imageUrl || '',
+                createdBy: userId,
+                modifiedBy: userId,
+                packageType: parsed.packageType || '',
+                createdDate: parsed.createdDate ? new Date(parsed.createdDate) : new Date(),
+                modifiedDate: new Date(),
+                status: parsed.status ?? true,
+              };
+              items.push(item);
+            }
           } catch (err) {
             this.logger.warn(
               `⚠️ Skipping invalid cart item: ${err.message}`
@@ -158,23 +212,24 @@ export class CartSyncService {
 
         // ✅ Instead of deleting all and re-saving, do a conflict-safe sync
         const existingItems = await this.cartItemRepo.find({ where: { userId } });
-        const redisProductIds = new Set(items.map(item => item.productId));
+        const redisKeys = new Set(items.map(item => `${item.productId}::${item.packageType || ''}`));
 
-        // 1) Remove items that are in DB but not in Redis (they were removed)
-        const itemsToRemove = existingItems.filter(item => !redisProductIds.has(item.productId));
+        // 1) Remove items that are in DB but not in Redis (by composite key)
+        const itemsToRemove = existingItems.filter(item => !redisKeys.has(`${item.productId}::${item.packageType || ''}`));
         if (itemsToRemove.length > 0) {
           await this.cartItemRepo.remove(itemsToRemove);
           this.logger.log(`🗑️ Removed ${itemsToRemove.length} items no longer in Redis for user ${userId}`);
         }
 
-        // 2) Clean up any DB duplicates by (userId, productId) keeping the most recent
-        const byProduct: Record<string, CartItem[]> = {} as any;
+        // 2) Clean up any DB duplicates by (userId, productId, packageType)
+        const byComposite: Record<string, CartItem[]> = {} as any;
         for (const it of existingItems) {
-          if (!byProduct[it.productId]) byProduct[it.productId] = [];
-          byProduct[it.productId].push(it);
+          const key = `${it.productId}::${it.packageType || ''}`;
+          if (!byComposite[key]) byComposite[key] = [];
+          byComposite[key].push(it);
         }
         let cleaned = 0;
-        for (const [pid, arr] of Object.entries(byProduct)) {
+        for (const [key, arr] of Object.entries(byComposite)) {
           if (arr.length > 1) {
             arr.sort((a, b) => new Date(b.modifiedDate || b.createdDate || 0).getTime() - new Date(a.modifiedDate || a.createdDate || 0).getTime());
             const keep = arr[0];
@@ -189,16 +244,20 @@ export class CartSyncService {
           this.logger.log(`🧹 Cleaned ${cleaned} duplicate DB rows for user ${userId}`);
         }
 
-        // 3) Upsert Redis items into DB atomically on (userId, productId)
+        // 3) De-duplicate incoming items by composite key before upsert
+        const dedupMap = new Map<string, DeepPartial<CartItem>>();
+        for (const it of items) {
+          const key = `${it.productId}::${it.packageType || ''}`;
+          dedupMap.set(key, { ...it }); // last-write-wins
+        }
+        const toUpsert = Array.from(dedupMap.values()).map(it => ({ ...it, modifiedDate: new Date() }));
+
         await this.cartItemRepo.upsert(
-          items.map(it => ({
-            ...it,
-            modifiedDate: new Date(),
-          })),
-          ['userId', 'productId']
+          toUpsert,
+          ['userId', 'productId', 'packageType']
         );
 
-        this.logger.log(`✅ Sync completed for user ${userId}: upserted ${items.length} items from Redis`);
+        this.logger.log(`✅ Sync completed for user ${userId}: upserted ${toUpsert.length} (split) items from Redis`);
       }
     } catch (error) {
       this.logger.error("❌ Failed to sync cart:", error.message);
