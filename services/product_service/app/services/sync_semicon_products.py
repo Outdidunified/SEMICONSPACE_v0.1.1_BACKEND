@@ -382,6 +382,6 @@ async def fetch_and_sync_semicon_product(digikey_data: dict):
         "manufacturer_part_number": listing_product.manufacturerPartNumber
     }
 
-    await send_event(topic="product.addedq", value=all_data_dict)
+    await send_event(topic="product.added", value=all_data_dict)
    
     return listing_product
