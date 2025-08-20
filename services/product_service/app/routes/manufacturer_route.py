@@ -276,15 +276,16 @@ async def get_manufacturer_counts():
 @router.get("/manufacturer/{manufacturer_id}/products", tags=["Products by Manufacturer"])
 async def get_products_by_manufacturer2(
     manufacturer_id: str,
-    skip: int = Query(0, ge=0),
-    limit: int = Query(100, ge=1, le=1000)
+    page: int = Query(1, ge=1, description="Page number"),
+    limit: int = Query(100, ge=1, le=1000, description="Maximum number of records per page"),
 ):
-    """Get products for a manufacturer, including mapped MPNs"""
+    """Get products for a manufacturer, including mapped MPNs, with pagination"""
     try:
         manufacturer_id = str(manufacturer_id).strip()
         if not manufacturer_id:
             raise HTTPException(status_code=400, detail="Manufacturer ID cannot be empty or whitespace")
 
+        # Check if manufacturer exists
         manufacturer_doc = await engine.find_one(
             SemiconManufacturer,
             SemiconManufacturer.semicon_manufacturer_id == manufacturer_id
@@ -292,6 +293,10 @@ async def get_products_by_manufacturer2(
         if not manufacturer_doc:
             raise HTTPException(status_code=404, detail=f"Manufacturer with ID '{manufacturer_id}' not found")
 
+        # Calculate skip from page & limit
+        skip = (page - 1) * limit
+
+        # Fetch products
         products = await engine.find(
             SemiconProducts,
             SemiconProducts.Manufacturer.semicon_manufacturer_id == manufacturer_id,
@@ -299,6 +304,7 @@ async def get_products_by_manufacturer2(
             limit=limit
         )
 
+        # Collect semicon_part_numbers for MPN mapping
         semicon_parts = [p.semicon_part_number for p in products if getattr(p, "semicon_part_number", None)]
         mpn_map = {}
         if semicon_parts:
@@ -306,6 +312,7 @@ async def get_products_by_manufacturer2(
             sp_docs = await sp_collection.find({"semicon_part_number": {"$in": semicon_parts}}).to_list(length=None)
             mpn_map = {doc.get("semicon_part_number"): doc.get("manufacturerPartNumber") for doc in sp_docs}
 
+        # Merge products with mapped MPNs
         response_data = []
         for product in products:
             item = jsonable_encoder(product)
@@ -313,19 +320,26 @@ async def get_products_by_manufacturer2(
             item["manufacturerPartNumber"] = mpn_map.get(semipn)
             response_data.append(item)
 
+        # Count total products for this manufacturer
         total_count = await engine.count(
             SemiconProducts,
             SemiconProducts.Manufacturer.semicon_manufacturer_id == manufacturer_id
         )
 
         return {
-            "success": True,
+            "status": "success",
             "message": f"Successfully retrieved {len(response_data)} products for manufacturer '{manufacturer_id}'",
             "data": {
                 "products": jsonable_encoder(response_data),
-                "pagination": {"total": total_count, "skip": skip, "limit": limit}
+                "pagination": {
+                    "total": total_count,
+                    "page": page,
+                    "limit": limit,
+                    "pages": (total_count + limit - 1) // limit
+                }
             }
         }
+
     except HTTPException:
         raise
     except Exception as e:
