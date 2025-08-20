@@ -4,8 +4,9 @@ export class PermissionDto {
   @IsString()
   module: string;
 
+  @IsOptional()
   @IsString()
-  sub_module: string;
+  sub_module?: string;   // 👈 make optional
 
   @IsOptional()
   @IsBoolean()
