@@ -1,7 +1,7 @@
 import { Entity, Column, PrimaryGeneratedColumn, Unique } from 'typeorm';
 
-// Ensure (userId, productId) is unique to avoid duplicates
-@Unique(['userId', 'productId'])
+// Ensure (userId, productId, packageType) is unique to allow separate rows per package split
+@Unique(['userId', 'productId', 'packageType'])
 @Entity('cart_items')
 export class CartItem {
   @PrimaryGeneratedColumn('uuid')
@@ -10,7 +10,7 @@ export class CartItem {
   @Column()
   userId: string;
 
-  @Column({ name: 'productid' }) // productId stored as "productid"
+  @Column({ name: 'productId' }) // mapped to renamed DB column "productId"
   productId: string;
 
   @Column()
