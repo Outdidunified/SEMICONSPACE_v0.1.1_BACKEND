@@ -1,4 +1,4 @@
-import { Injectable, HttpException, HttpStatus } from "@nestjs/common";
+import { Injectable, HttpException, HttpStatus, ConflictException, NotFoundException, BadRequestException, Logger } from "@nestjs/common";
 import { InjectModel } from "@nestjs/sequelize";
 import { ManageUser } from "./manage-user.model";
 import { Profile } from "../../models/profile.model";
@@ -9,6 +9,8 @@ import { Op } from "sequelize";
 
 @Injectable()
 export class ManageUserService {
+  private readonly logger = new Logger(ManageUserService.name);
+
   constructor(
     @InjectModel(ManageUser)
     private readonly userModel: typeof ManageUser,
@@ -33,147 +35,191 @@ export class ManageUserService {
     const existingUser = await this.userModel.findOne({ where });
     if (existingUser) {
       if (existingUser.email === email) {
-        return "Email already exists";
+        throw new ConflictException("Email already exists");
       }
       if (existingUser.phone === phone) {
-        return "Phone number already exists";
+        throw new ConflictException("Phone number already exists");
       }
     }
-    return null;
   }
 
   // ✅ Create user in users table and emit Kafka
-async create(dto: CreateManageUserDto) {
-  try {
-    // Validate email and phone uniqueness
-    const errorMsg = await this.validateUniqueEmailPhone(dto.email, dto.phone);
-    if (errorMsg) {
-      return {
-        statusCode: HttpStatus.CONFLICT,
-        error: true,
-        message: errorMsg,
-      };
-    }
-
-    // Prepare new user data
-    const newUserData = {
-      first_name: dto.first_name,
-      last_name: dto.last_name,
-      email: dto.email,
-      phone: dto.phone,
-      password: dto.password,
-      role: dto.role,
-      role_id: dto.role_id,
-      created_by: dto.created_by,
-      created_at: new Date(), // creation timestamp
-      modified_date: null, // explicitly set to null at creation
-    };
-
-    const new_user = await this.userModel.create(newUserData);
-
-    // Produce Kafka (or other message bus) event
-    await this.producerService.produceEvent('user.created', {
-      userId: new_user.userId,
-      first_name: new_user.first_name,
-      last_name: new_user.last_name,
-      email: new_user.email,
-      password:new_user.password,
-      phone: new_user.phone,
-      role: new_user.role,
-      role_id: new_user.role_id,
-      created_at: new_user.created_at?.toISOString(),
-      created_by: new_user.created_by,
-    });
-
-    return {
-      statusCode: HttpStatus.OK,
-      error: false,
-      message: 'User created successfully',
-      data: new_user,
-    };
-  } catch (error) {
-    return {
-      statusCode: HttpStatus.BAD_REQUEST,
-      error: true,
-      message: 'User creation failed: ' + (error.message || 'Unknown error'),
-    };
-  }
-}
-
-
-  // 🔍 Get all profiles from profile_details table
-  async findAll() {
+  async create(dto: CreateManageUserDto): Promise<ManageUser> {
     try {
-      const allProfiles = await this.profileModel.findAll({
-        order: [["created_at", "DESC"]],
-      });
-      return {
-        statusCode: HttpStatus.OK,
-        error: false,
-        message: "Profiles fetched successfully",
-        data: allProfiles,
-      };
-    } catch (error) {
-      return {
-        statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
-        error: true,
-        message: "Failed to fetch profiles",
-      };
-    }
-  }
+      // Validate email and phone uniqueness
+      await this.validateUniqueEmailPhone(dto.email, dto.phone);
 
-  // 🔍 Get single profile by userId
-  async findOne(userId: string) {
-    try {
-      const profile = await this.profileModel.findByPk(userId);
-      if (!profile) {
-        return {
-          statusCode: HttpStatus.NOT_FOUND,
-          error: true,
-          message: "Profile not found",
-        };
+      // Prepare new user data
+      const newUserData = {
+        first_name: dto.first_name,
+        last_name: dto.last_name,
+        email: dto.email,
+        phone: dto.phone,
+        password: dto.password,
+        role: dto.role,
+        role_id: dto.role_id,
+        created_by: dto.created_by,
+        created_at: new Date(),
+        modified_date: null,
+      };
+
+      const new_user = await this.userModel.create(newUserData);
+
+      // Produce Kafka event (non-blocking)
+      try {
+        await this.producerService.produceEvent('user.created', {
+          userId: new_user.userId,
+          first_name: new_user.first_name,
+          last_name: new_user.last_name,
+          email: new_user.email,
+          password: new_user.password,
+          phone: new_user.phone,
+          role: new_user.role,
+          role_id: new_user.role_id,
+          created_at: new_user.created_at?.toISOString(),
+          created_by: new_user.created_by,
+        });
+      } catch (kafkaError) {
+        this.logger.error('Failed to publish user.created event', kafkaError);
+        // Don't fail the operation due to Kafka issues
       }
-      return {
-        statusCode: HttpStatus.OK,
-        error: false,
-        message: "Profile fetched successfully",
-        data: profile,
-      };
+
+      this.logger.log(`User created successfully: ${new_user.userId}`);
+      return new_user;
     } catch (error) {
-      return {
-        statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
-        error: true,
-        message: "Failed to fetch profile",
-      };
+      this.logger.error('User creation failed', error);
+      throw error; // Let the global error handler manage this
     }
   }
 
-  // 📦 Add to manage-user.service.ts
 
+  // 🔍 Get all profiles from profile_details table with pagination and filtering
+  async findAll(query: any = {}) {
+    try {
+      const {
+        page = 1,
+        limit = 10,
+        search,
+        role,
+        sortBy = 'created_at',
+        sortOrder = 'DESC'
+      } = query;
+
+      const pageNum = parseInt(page.toString());
+      const limitNum = parseInt(limit.toString());
+      const offset = (pageNum - 1) * limitNum;
+      const where: any = {};
+
+      // Add search functionality
+      if (search) {
+        where[Op.or] = [
+          { first_name: { [Op.iLike]: `%${search}%` } },
+          { last_name: { [Op.iLike]: `%${search}%` } },
+          { email: { [Op.iLike]: `%${search}%` } },
+        ];
+      }
+
+      // Add role filter
+      if (role) {
+        where.role = role;
+      }
+
+      const { count, rows } = await this.profileModel.findAndCountAll({
+        where,
+        order: [[sortBy, sortOrder]],
+        limit: limitNum,
+        offset: offset,
+        attributes: { exclude: ['password'] }, // Don't return passwords
+      });
+
+      const totalPages = Math.ceil(count / limitNum);
+
+      return {
+        users: rows,
+        pagination: {
+          currentPage: pageNum,
+          totalPages,
+          totalItems: count,
+          itemsPerPage: limitNum,
+          hasNextPage: pageNum < totalPages,
+          hasPreviousPage: pageNum > 1,
+        }
+      };
+    } catch (error) {
+      this.logger.error('Failed to fetch users', error);
+      throw new HttpException('Failed to fetch users', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  // 🔍 Get single profile by userId, email, or phone
+  async findOne(searchParams: { userId?: string; email?: string; phone?: string }): Promise<Profile> {
+    try {
+      let profile: Profile | null = null;
+      const { userId, email, phone } = searchParams;
+      
+      // Search by userId first (if provided)
+      if (userId) {
+        profile = await this.profileModel.findByPk(userId, {
+          attributes: { exclude: ['password'] },
+        });
+      }
+      // If not found by userId or userId not provided, try email
+      else if (email) {
+        profile = await this.profileModel.findOne({
+          where: { email },
+          attributes: { exclude: ['password'] },
+        });
+      }
+      // If not found by email or email not provided, try phone
+      else if (phone) {
+        profile = await this.profileModel.findOne({
+          where: { phone },
+          attributes: { exclude: ['password'] },
+        });
+      }
+      
+      if (!profile) {
+        throw new NotFoundException("User not found");
+      }
+      
+      return profile;
+    } catch (error) {
+      const { userId, email, phone } = searchParams;
+      const searchBy = userId ? `userId: ${userId}` : email ? `email: ${email}` : `phone: ${phone}`;
+      this.logger.error(`Failed to fetch user by ${searchBy}`, error);
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      throw new HttpException('Failed to fetch user', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  // 📦 Get user statistics
   async getUserStats() {
     try {
       const total = await this.profileModel.count();
       const active = await this.profileModel.count({ where: { status: true } });
-      const inactive = await this.profileModel.count({
-        where: { status: false },
+      const inactive = await this.profileModel.count({ where: { status: false } });
+
+      // Get role distribution
+      const roleStats = await this.profileModel.findAll({
+        attributes: [
+          'role',
+          [this.profileModel.sequelize.fn('COUNT', this.profileModel.sequelize.col('role')), 'count']
+        ],
+        group: ['role'],
+        raw: true
       });
 
       return {
-        statusCode: HttpStatus.OK,
-        error: false,
-        message: "User stats fetched successfully",
-        data: {
-          total,
-          active,
-          inactive,
-        },
+        total,
+        active,
+        inactive,
+        roleDistribution: roleStats,
       };
     } catch (error) {
-      return {
-        statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
-        error: true,
-        message: "Failed to fetch user stats",
-      };
+      this.logger.error('Failed to fetch user stats', error);
+      throw new HttpException('Failed to fetch user statistics', HttpStatus.INTERNAL_SERVER_ERROR);
     }
   }
 // ✏️ Update user
@@ -283,21 +329,30 @@ async update(
       }
     }
 
-    // 📝 Detect general field changes
+    // 📝 Detect general field changes with proper type handling
     const fieldChanges = [
       "first_name",
       "last_name",
       "role",
-      "role_id",
     ].some((key) => dto[key] !== undefined && dto[key] !== profile[key]);
 
-    const hasAnyChanges = fieldChanges || phoneChanged || passwordChanged || statusChanged;
+    // Handle role_id separately with type conversion
+    let roleIdChanged = false;
+    if (dto.role_id !== undefined) {
+      const dtoRoleId = String(dto.role_id);
+      const profileRoleId = String(profile.role_id);
+      if (dtoRoleId !== profileRoleId) {
+        roleIdChanged = true;
+      }
+    }
+
+    const hasAnyChanges = fieldChanges || roleIdChanged || phoneChanged || passwordChanged || statusChanged;
 
     if (!hasAnyChanges) {
       return {
-        statusCode: HttpStatus.NOT_MODIFIED,
+        statusCode: HttpStatus.PAYMENT_REQUIRED,
         error: true,
-        message: "No changes detected in the provided data",
+        message: "No changes made",
       };
     }
 
@@ -381,7 +436,7 @@ async update(
     if (passwordChanged) {
       changeMessages.push("password updated");
     }
-    if (fieldChanges) {
+    if (fieldChanges || roleIdChanged) {
       changeMessages.push("profile information updated");
     }
 

@@ -15,7 +15,7 @@ export const sequelizeConfig: SequelizeModuleOptions = {
   database: process.env.POSTGRES_DB || 'semicon',
   models: [Profile, Address, Role, ManageUser, Permission], // <-- Added Permission
   autoLoadModels: true,
-  synchronize: true,   // 👈 this creates table automatically
+  synchronize: false,   // 👈 disabled to avoid conflicts with existing table
   logging: false,
   retry: { max: 10 },
   pool: {

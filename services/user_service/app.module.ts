@@ -2,6 +2,7 @@ import * as dotenv from 'dotenv';
 dotenv.config(); // <-- Load env before SequelizeModule
 
 import { Module, OnModuleInit, NestModule, MiddlewareConsumer, Inject } from '@nestjs/common';
+import { APP_FILTER } from '@nestjs/core';
 import { SequelizeModule, InjectConnection } from '@nestjs/sequelize';
 import { Sequelize } from 'sequelize-typescript';
 
@@ -13,6 +14,7 @@ import { PermissionModule } from './src/modules/permissions/permission.module';
 
 import { ConsumerService } from './src/kafka/consumer.service';
 import { sequelizeConfig } from './src/config/db';
+import { GlobalErrorFilter } from './src/middlewares/errorHandler';
 
 @Module({
   imports: [
@@ -21,9 +23,15 @@ import { sequelizeConfig } from './src/config/db';
     AddressModule,
     RoleModule,
     ManageUserModule,
-    PermissionModule, // <-- Added here
+    PermissionModule,
   ],
-  providers: [ConsumerService],
+  providers: [
+    ConsumerService,
+    {
+      provide: APP_FILTER,
+      useClass: GlobalErrorFilter,
+    },
+  ],
 })
 export class AppModule implements OnModuleInit, NestModule {
   constructor(@InjectConnection() private readonly sequelize: Sequelize) {}
