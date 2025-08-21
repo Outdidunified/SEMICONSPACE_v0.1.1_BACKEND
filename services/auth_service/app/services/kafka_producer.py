@@ -1,51 +1,43 @@
-# app/kafka_producer.py
 import os
 import json
 import asyncio
-import logging
+from app.utils.logger import get_logger
 from typing import Optional
 from aiokafka import AIOKafkaProducer
-from aiokafka.errors import KafkaConnectionError
 from dotenv import load_dotenv
+from datetime import datetime
+from uuid import UUID
 
-logger = logging.getLogger(__name__)
 load_dotenv()
+logger = get_logger(__name__)
 
-KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "172.235.17.60:9092")
+KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "")
+
 producer: Optional[AIOKafkaProducer] = None
 
 
-async def start_kafka(max_retries: int = 0, retry_delay: int = 3) -> None:
-    """
-    Start Kafka producer and wait until it connects.
-    max_retries=0 means infinite retries until success.
-    """
+class EnhancedJSONEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, (datetime, UUID)):
+            return str(obj)
+        return super().default(obj)
+
+
+async def start_kafka() -> None:
     global producer
     producer = AIOKafkaProducer(
         bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS,
-        value_serializer=lambda v: json.dumps(v).encode("utf-8"),
+        value_serializer=lambda v: json.dumps(v, cls=EnhancedJSONEncoder).encode("utf-8"),
     )
 
-    attempt = 1
     while True:
         try:
             await producer.start()
-            logger.info("✅ Kafka producer started and connected.")
+            logger.info("✅ Kafka producer started")
             return
-        except KafkaConnectionError as e:
-            if max_retries and attempt >= max_retries:
-                raise RuntimeError(
-                    f"❌ Kafka connection failed after {attempt} attempts."
-                ) from e
-            logger.warning(
-                f"⏳ Kafka not ready, retrying in {retry_delay}s "
-                f"(Attempt {attempt}{'' if max_retries == 0 else f'/{max_retries}'})... Error: {e}"
-            )
-            attempt += 1
-            await asyncio.sleep(retry_delay)
         except Exception as e:
-            logger.error(f"❌ Unexpected error starting Kafka producer: {e}")
-            raise
+            logger.warning(f"⏳ Kafka producer not ready, retrying in 3s: {e}")
+            await asyncio.sleep(3)
 
 
 async def stop_kafka() -> None:
@@ -53,16 +45,16 @@ async def stop_kafka() -> None:
         await producer.stop()
         logger.info("✅ Kafka producer stopped")
     else:
-        logger.info("ℹ️ Kafka producer was not running")
+        logger.info("⚠️ Kafka producer was not initialized")
 
 
-async def send_event(topic: str, data: dict) -> None:
-    if not producer:
-        logger.warning("⚠️ Kafka producer is not initialized. Cannot send event.")
+async def send_event(topic: str, value: dict) -> None:
+    if producer is None:
+        logger.warning("⚠️ Kafka producer is not initialized")
         return
+
     try:
-        await producer.send_and_wait(topic, data)
-        logger.info(f"✅ Event sent to topic '{topic}': {data}")
+        await producer.send_and_wait(topic, value=value)
+        logger.info(f"✅ Event sent to topic '{topic}':\n{json.dumps(value, indent=2, cls=EnhancedJSONEncoder)}")
     except Exception as e:
         logger.error(f"❌ Failed to send event to topic '{topic}': {e}")
-        raise

@@ -135,7 +135,7 @@
     // Fixed API base for local backend
     const API_BASE = 'http://localhost:8000';
 
-    // Google Client ID will be fetched from backend
+    // Google Client ID will be fetched from backendF
     let GOOGLE_CLIENT_ID = null;
 
     // ====== Basic helpers ======
@@ -211,14 +211,24 @@
         return;
       }
       try {
-        const res = await fetch(`${API_BASE}/auth/google/login`, {
+        const res = await fetch(`${API_BASE}/auth/googleauthentication`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ id_token: latestIdToken })
         });
         const data = await res.json();
         setOut({ status: res.status, data });
-        if (res.status === 404) {
+        if (res.ok && data?.data?.access_token) {
+          try { localStorage.setItem('access_token', data.data.access_token); } catch {}
+        }
+        if (
+          res.status === 404 ||
+          (res.status === 400 && (
+            (data?.detail || '').includes('First-time Google sign-in requires phone and role_id') ||
+            (data?.message || '').includes('First-time Google sign-in requires phone and role_id') ||
+            (data?.data?.message || '').includes('First-time Google sign-in requires phone and role_id')
+          ))
+        ) {
           // Not registered yet — show Google register fields
           showGoogleRegister();
         }
@@ -234,32 +244,33 @@
       if (!phone) return alert('Enter phone');
       if (!roleId) return alert('Enter role_id');
       try {
-        const res = await fetch(`${API_BASE}/auth/google/register`, {
+        const res = await fetch(`${API_BASE}/auth/googleauthentication`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ id_token: latestIdToken, phone, role_id: roleId })
         });
         const data = await res.json();
         setOut({ status: res.status, data });
-        if (res.ok) hideGoogleRegister();
+        if (res.ok) {
+          if (data?.data?.access_token) {
+            try { localStorage.setItem('access_token', data.data.access_token); } catch {}
+          }
+          hideGoogleRegister();
+        }
       } catch (e) {
         setOut({ error: e?.message || String(e) });
       }
     }
 
-    // ====== Email/Password Login ======
+    // ====== Email/Password Login (unchanged backend endpoints unknown, so keep display only)
     async function handleLogin(ev) {
       ev.preventDefault();
       const email = document.getElementById('email').value.trim();
       const password = document.getElementById('password').value;
       try {
-        const res = await fetch(`${API_BASE}/auth/login`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ identifier: email, password })
-        });
-        const data = await res.json();
-        setOut({ status: res.status, data });
+        // If you have an email/password login endpoint, update here accordingly.
+        // For now, just echo the payload.
+        setOut({ info: 'Email/password login payload', payload: { identifier: email, password } });
       } catch (e) {
         setOut({ error: e?.message || String(e) });
       }

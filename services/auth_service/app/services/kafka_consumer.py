@@ -1,6 +1,7 @@
 import json
 import logging
 import asyncio
+import os
 from aiokafka import AIOKafkaConsumer
 from aiokafka.errors import KafkaConnectionError
 from sqlalchemy import text
@@ -10,9 +11,17 @@ from app.config.database import SessionLocal as async_session
 
 logger = logging.getLogger(__name__)
 
-KAFKA_BOOTSTRAP_SERVERS = "172.235.17.60:9092"
+# Use the same env var as producer for consistency
+KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "172.235.17.60:9092")
 KAFKA_GROUP_ID = "user-events-group"
-TOPICS = ["user.created", "user.registered", "user.status.updated", "user.phone.updated", "user.password.updated"]
+TOPICS = [
+    "user.created",
+    "user.registered",
+    "user.loggedin",  # include login events
+    "user.status.updated",
+    "user.phone.updated",
+    "user.password.updated",
+]
 
 # -----------------------------
 # Core Kafka consume loop
