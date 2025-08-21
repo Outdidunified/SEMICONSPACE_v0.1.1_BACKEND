@@ -81,11 +81,7 @@
 
     <!-- Google Register extra fields (shown only when registering with Google) -->
     <div id="google-register-panel" class="panel hidden">
-      <label for="gphone">Phone (for register)</label>
-      <input id="gphone" placeholder="9876543210" />
 
-      <label for="grole">Role ID (for register)</label>
-      <input id="grole" type="number" value="2" />
 
       <div style="margin-top: 12px; display: flex; gap: 8px;">
         <button class="btn btn-primary" type="button" onclick="googleRegister()">Register with Google</button>
@@ -239,10 +235,8 @@
 
     async function googleRegister() {
       if (!latestIdToken) return setOut('Get Google token first by clicking "Sign In with Google"');
-      const phone = document.getElementById('gphone').value.trim();
-      const roleId = parseInt(document.getElementById('grole').value, 10);
-      if (!phone) return alert('Enter phone');
-      if (!roleId) return alert('Enter role_id');
+      const phone = 'none'; // Phone not required; send placeholder
+      const roleId = 2; // Default role
       try {
         const res = await fetch(`${API_BASE}/auth/googleauthentication`, {
           method: 'POST',

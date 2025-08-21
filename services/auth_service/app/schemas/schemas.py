@@ -22,7 +22,7 @@ class LoginRequest(BaseModel):
 # Google auth requests
 class GoogleRegisterRequest(BaseModel):
     id_token: str
-    phone: str
+    phone: Optional[str] = None
     role_id: int
 
 
@@ -41,7 +41,7 @@ class UserResponse(BaseModel):
     first_name: str
     last_name: str
     email: EmailStr
-    phone: str
+    phone: Optional[str] = None
     role: str
     role_id: int
     created_at: datetime
@@ -60,7 +60,7 @@ class TokenResponse(BaseModel):
     role: str
     role_id: int
     email: EmailStr
-    phone: str
+    phone: Optional[str] = None
     first_name: str
     last_name: str
 

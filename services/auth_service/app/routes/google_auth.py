@@ -330,20 +330,22 @@ async def google_signup(
         }
 
     # Registration path (first-time Google sign-in)
-    if not body.phone or not body.role_id:
+    if not body.role_id:
         raise HTTPException(
             status_code=400,
-            detail="First-time Google sign-in requires phone and role_id"
+            detail="First-time Google sign-in requires role_id"
         )
 
-    phone = _normalize_phone(body.phone)
-    if not re.match(MOBILE_REGEX, phone):
-        raise HTTPException(status_code=400, detail="Invalid mobile number format")
+    # Accept phone as optional; if missing, use email as unique placeholder to satisfy non-null + unique constraints
+    phone = _normalize_phone(body.phone) if body.phone else email
 
-    # Check phone unique
+    # Skip format validation for phone
+
+    # Ensure phone uniqueness
     existing_phone = await db.execute(select(models.User).where(models.User.phone == phone))
     if existing_phone.scalar_one_or_none():
-        raise HTTPException(status_code=400, detail="Phone number already registered")
+        # If collision occurs, append a short suffix to keep it unique
+        phone = f"{phone}-g{secrets.token_hex(2)}"
 
     # Validate role
     role_row = await _get_role_by_id(db, body.role_id)
@@ -358,7 +360,7 @@ async def google_signup(
         first_name=given_name or "",
         last_name=family_name or "",
         email=email,
-        phone=phone,
+        phone=None,
         password=placeholder_password,
         role=role_name,
         role_id=body.role_id,
