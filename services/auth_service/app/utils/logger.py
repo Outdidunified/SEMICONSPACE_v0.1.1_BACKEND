@@ -4,6 +4,9 @@ import sys
 import os
 from logging.handlers import TimedRotatingFileHandler
 
+# Explicitly export public API for static analyzers (e.g., Pylance)
+__all__ = ["get_logger", "logger"]
+
 # -----------------------------
 # Formatter
 # -----------------------------
@@ -45,8 +48,25 @@ aiokafka_logger.addHandler(console_handler)
 aiokafka_logger.addHandler(file_handler)
 
 # -----------------------------
-# Usage examples
+# Public API
 # -----------------------------
-# logger.info("✅ Server started successfully")
-# logger.warning("⚠️ Something might be wrong")
-# logger.error("❌ Critical error occurred")
+
+def get_logger(name=None) -> logging.Logger:
+    """
+    Return a module-specific logger that reuses the global handlers.
+    Ensures handlers are attached only once to avoid duplicate logs.
+    """
+    if not name:
+        return logger
+    named = logging.getLogger(name)
+    named.setLevel(logging.INFO)
+    # Attach console and file handlers once
+    for h in logger.handlers:
+        if h not in named.handlers:
+            named.addHandler(h)
+    return named
+
+# Usage examples
+# get_logger(__name__).info("✅ Server started successfully")
+# get_logger(__name__).warning("⚠️ Something might be wrong")
+# get_logger(__name__).error("❌ Critical error occurred")

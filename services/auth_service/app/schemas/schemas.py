@@ -30,6 +30,12 @@ class GoogleLoginRequest(BaseModel):
     id_token: str
 
 
+class GoogleSignInRequest(BaseModel):
+    id_token: str
+    phone: Optional[str] = None
+    role_id: Optional[int] = 2
+
+
 class UserResponse(BaseModel):
     userId: UUID
     first_name: str
