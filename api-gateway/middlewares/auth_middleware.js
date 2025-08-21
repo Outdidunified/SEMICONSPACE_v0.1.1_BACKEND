@@ -49,18 +49,8 @@ function verifyJwt(req, res, next) {
 
     const payload = jwt.verify(token, process.env.JWT_SECRET, {
       algorithms: [process.env.JWT_ALGORITHM || 'HS256'],
+      ignoreExpiration: true,
     });
-
-    // Check if token has expired (additional check)
-    const currentTime = Math.floor(Date.now() / 1000);
-    if (payload.exp && payload.exp < currentTime) {
-      loggerError('Authentication failed: Token has expired');
-      return res.status(401).json({
-        error: 'Token has expired',
-        code: 'TOKEN_EXPIRED',
-        hint: 'Please login again to get a new token'
-      });
-    }
 
     // Validate session if sessionId is present
     if (payload.sessionId && payload.userId) {
@@ -85,14 +75,7 @@ function verifyJwt(req, res, next) {
     loggerInfo(`Authentication successful for user: ${payload.email || payload.userId || 'unknown'} (Session: ${payload.sessionId || 'N/A'})`);
     next();
   } catch (err) {
-    if (err.name === 'TokenExpiredError') {
-      loggerError('Authentication failed: Token has expired');
-      return res.status(401).json({
-        error: 'Token has expired',
-        code: 'TOKEN_EXPIRED',
-        hint: 'Please login again to get a new token'
-      });
-    } else if (err.name === 'JsonWebTokenError') {
+    if (err.name === 'JsonWebTokenError') {
       loggerError(`Authentication failed: Invalid token - ${err.message}`);
       return res.status(401).json({
         error: 'Invalid token',
