@@ -43,103 +43,338 @@ export class CartService {
     return this.respond(500, fallbackMessage);
   }
 
-  async handleAddToCart(body: {
-    userId: string;
-    productId: string;
-    quantity: number;
-    price?: number; // optional; derived from product service if not provided
-    packageType?: string; // optional; derived from product service if not provided
-  }): Promise<{ error: boolean; message: any; data: Record<string, any>; statusCode?: number }> {
-    try {
-      const { userId, productId, quantity, price: userPrice, packageType } = body;
-      const redis = this.redisService.getClient();
-      const redisKey = `cart:${userId}`;
-      // Use composite field key to support multiple package splits per product
-      const normalizePkg = (s?: string) => (typeof s === 'string' ? s.trim() : s);
-      const makeFieldKey = (pid: string, pkg?: string) => (pkg ? `${pid}::${normalizePkg(pkg)}` : pid);
-      const compositeFieldKey = makeFieldKey(productId, normalizePkg(packageType));
+  // async handleAddToCart(body: {
+  //   userId: string;
+  //   productId: string;
+  //   quantity: number;
+  //   price?: number; // optional; derived from product service if not provided
+  //   packageType?: string; // optional; derived from product service if not provided
+  // }): Promise<{ error: boolean; message: any; data: Record<string, any>; statusCode?: number }> {
+  //   try {
+  //     const { userId, productId, quantity, price: userPrice, packageType } = body;
+  //     const redis = this.redisService.getClient();
+  //     const redisKey = `cart:${userId}`;
+  //     // Use composite field key to support multiple package splits per product
+  //     const normalizePkg = (s?: string) => (typeof s === 'string' ? s.trim() : s);
+  //     const makeFieldKey = (pid: string, pkg?: string) => (pkg ? `${pid}::${normalizePkg(pkg)}` : pid);
+  //     const compositeFieldKey = makeFieldKey(productId, normalizePkg(packageType));
 
-      if (!userId || !productId || typeof quantity !== 'number' || quantity < 0) {
-        return this.respond(402, 'Invalid input. userId, productId and non-negative quantity are required');
-      }
+  //     if (!userId || !productId || typeof quantity !== 'number' || quantity < 0) {
+  //       return this.respond(402, 'Invalid input. userId, productId and non-negative quantity are required');
+  //     }
 
-      if (quantity === 0) {
-        return await this.handleRemoveFromCart(userId, productId, packageType);
-      }
+  //     if (quantity === 0) {
+  //       return await this.handleRemoveFromCart(userId, productId, packageType);
+  //     }
 
-      let baseUrl = this.configService.get<string>('PRODUCT_SERVICE_URL');
-      if (!baseUrl || baseUrl.includes('${')) {
-        const host = this.configService.get<string>('PRODUCT_SERVICE_HOST');
-        const port = this.configService.get<string>('PRODUCT_SERVICE_PORT');
-        baseUrl = `http://${host}:${port}`;
-      }
-      baseUrl = baseUrl.replace(/\/+$/, '');
+  //     let baseUrl = this.configService.get<string>('PRODUCT_SERVICE_URL');
+  //     if (!baseUrl || baseUrl.includes('${')) {
+  //       const host = this.configService.get<string>('PRODUCT_SERVICE_HOST');
+  //       const port = this.configService.get<string>('PRODUCT_SERVICE_PORT');
+  //       baseUrl = `http://${host}:${port}`;
+  //     }
+  //     baseUrl = baseUrl.replace(/\/+$/, '');
 
-      const externalUrl = `${baseUrl}/product/quantity-price/check/${productId}/${quantity}`; // expects packaging_breakdown and total_price
-      // console.log(`🌍 Fetching product details from: ${externalUrl}`);
+  //     const externalUrl = `${baseUrl}/product/quantity-price/check/${productId}/${quantity}`; // expects packaging_breakdown and total_price
+  //     // console.log(`🌍 Fetching product details from: ${externalUrl}`);
     
       
-      let response;
-      try {
-        response = await firstValueFrom(
-          this.httpService.get(externalUrl).pipe(
-            catchError((error) => {
-              console.error('❌ Product service error:', error.message);
-              if (error.response?.status === 404) {
-                return of({ data: { product: null, error: true, message: 'Product not found' } });
-              }
-              return of({ data: { product: null, error: true, message: 'Product service unavailable' } });
-            }),
-          ),
-        );
-          // console.log('🌍 External API Response:', JSON.stringify(response.data, null, 2));
+  //     let response;
+  //     try {
+  //       response = await firstValueFrom(
+  //         this.httpService.get(externalUrl).pipe(
+  //           catchError((error) => {
+  //             console.error('❌ Product service error:', error.message);
+  //             if (error.response?.status === 404) {
+  //               return of({ data: { product: null, error: true, message: 'Product not found' } });
+  //             }
+  //             return of({ data: { product: null, error: true, message: 'Product service unavailable' } });
+  //           }),
+  //         ),
+  //       );
+  //         // console.log('🌍 External API Response:', JSON.stringify(response.data, null, 2));
 
-      } catch (error: any) {
-        return this.respond(500, 'Failed to fetch product details');
-      }
+  //     } catch (error: any) {
+  //       return this.respond(500, 'Failed to fetch product details');
+  //     }
 
-      const responseData = response.data;
-      const payload = responseData?.data || responseData; // normalize
-      const product = payload?.product;
+  //     const responseData = response.data;
+  //     const payload = responseData?.data || responseData; // normalize
+  //     const product = payload?.product;
 
-      if (!product || responseData?.error) {
-        const message = responseData?.message || 'Product not found';
-        return this.respond(404, message);
-      }
+  //     if (!product || responseData?.error) {
+  //       const message = responseData?.message || 'Product not found';
+  //       return this.respond(404, message);
+  //     }
 
-      // Derive price and packageType from packaging_breakdown/total_price
-      const breakdown = Array.isArray(payload?.packaging_breakdown) ? payload.packaging_breakdown : [];
-      const derivedPackageType = packageType || (breakdown.length > 0 ? breakdown[0].package_type : undefined);
-      const unitPriceFromBreakdown = breakdown.length > 0 ? breakdown[0].unit_price : undefined;
-      const computedTotalPrice =
-        typeof payload?.total_price === 'number'
-          ? payload.total_price
-          : (Array.isArray(breakdown)
-              ? breakdown.reduce((sum: number, b: any) => sum + (typeof b?.extended_price === 'number' ? b.extended_price : 0), 0)
-              : 0) || (typeof userPrice === 'number' ? userPrice : 0);
+  //     // Derive price and packageType from packaging_breakdown/total_price
+  //     const breakdown = Array.isArray(payload?.packaging_breakdown) ? payload.packaging_breakdown : [];
+  //     const derivedPackageType = packageType || (breakdown.length > 0 ? breakdown[0].package_type : undefined);
+  //     const unitPriceFromBreakdown = breakdown.length > 0 ? breakdown[0].unit_price : undefined;
+  //     const computedTotalPrice =
+  //       typeof payload?.total_price === 'number'
+  //         ? payload.total_price
+  //         : (Array.isArray(breakdown)
+  //             ? breakdown.reduce((sum: number, b: any) => sum + (typeof b?.extended_price === 'number' ? b.extended_price : 0), 0)
+  //             : 0) || (typeof userPrice === 'number' ? userPrice : 0);
 
-      const now = new Date();
+  //     const now = new Date();
 
-      // Merge with existing Redis item to avoid overwriting other fields and support quantity change semantics
-      const existingJson = await redis.hGet(redisKey, compositeFieldKey);
-      let existing: any = existingJson ? JSON.parse(existingJson) : null;
+  //     // Merge with existing Redis item to avoid overwriting other fields and support quantity change semantics
+  //     const existingJson = await redis.hGet(redisKey, compositeFieldKey);
+  //     let existing: any = existingJson ? JSON.parse(existingJson) : null;
 
-      // Decide quantity behavior: override to requested_quantity from payload, else use provided quantity
-      const normalizedQuantity = typeof payload?.requested_quantity === 'number' ? payload.requested_quantity : quantity;
+  //     // Decide quantity behavior: override to requested_quantity from payload, else use provided quantity
+  //     const normalizedQuantity = typeof payload?.requested_quantity === 'number' ? payload.requested_quantity : quantity;
 
-      // If breakdown exists, split and store each package as its own Redis field (pid::packageType)
-      let storedPackageType = derivedPackageType;
-      let storedQuantity = normalizedQuantity;
-      let storedPrice = computedTotalPrice;
+  //     // If breakdown exists, split and store each package as its own Redis field (pid::packageType)
+  //     let storedPackageType = derivedPackageType;
+  //     let storedQuantity = normalizedQuantity;
+  //     let storedPrice = computedTotalPrice;
 
-      if (Array.isArray(breakdown) && breakdown.length > 0) {
+  //     if (Array.isArray(breakdown) && breakdown.length > 0) {
+  //       for (const b of breakdown) {
+  //         const pkgType = normalizePkg(b?.package_type || derivedPackageType);
+  //         const qty = typeof b?.quantity === 'number' ? b.quantity : normalizedQuantity;
+  //         const extended = typeof b?.extended_price === 'number' ? b.extended_price : computedTotalPrice;
+  //         const fieldKey = makeFieldKey(product.semicon_part_number || productId, pkgType);
+
+  //         // Set exact quantities and totals from current breakdown (no accumulation)
+  //         const existingSplitJson = await redis.hGet(redisKey, fieldKey);
+  //         const existingSplit: any = existingSplitJson ? JSON.parse(existingSplitJson) : null;
+
+  //         const itemData = {
+  //           ...(existingSplit || {}),
+  //           userId,
+  //           productId: product.semicon_part_number || productId,
+  //           quantity: qty, // exact quantity from current breakdown
+  //           name: product.name || existingSplit?.name || existing?.name || '',
+  //           price: extended, // exact extended total for this split
+  //           packageType: pkgType,
+  //           description: product.description || existingSplit?.description || existing?.description || '',
+  //           manufacturerName: product.manufacturer_name || existingSplit?.manufacturerName || existing?.manufacturerName || '',
+  //           manufacturerPartNumber: product.manufacturer_part_number || existingSplit?.manufacturerPartNumber || existing?.manufacturerPartNumber || '',
+  //           datasheetUrl: product.datasheet_url || existingSplit?.datasheetUrl || existing?.datasheetUrl || '',
+  //           imageUrl: product.image_url || existingSplit?.imageUrl || existing?.imageUrl || '',
+  //           createdBy: existingSplit?.createdBy || existing?.createdBy || userId,
+  //           modifiedBy: userId,
+  //           createdDate: existingSplit?.createdDate ? new Date(existingSplit.createdDate) : (existing?.createdDate ? new Date(existing.createdDate) : now),
+  //           modifiedDate: now,
+  //           status: product.status ?? (existingSplit?.status ?? existing?.status ?? true),
+  //           // Keep full breakdown for transparency, even though row is split
+  //           packagingBreakdown: breakdown,
+  //         };
+
+  //         await redis.hSet(redisKey, fieldKey, JSON.stringify(itemData));
+  //       }
+
+  //       // Remove any legacy/base entry without packageType to avoid duplicates
+  //       const basePid = product.semicon_part_number || productId;
+  //       await redis.hDel(redisKey, basePid);
+
+  //       // Remove any split entries for this product that are NOT in the current breakdown
+  //       const validPkgSet = new Set(
+  //         breakdown
+  //           .map((b: any) => normalizePkg(b?.package_type || derivedPackageType))
+  //           .filter((x: any) => !!x)
+  //       );
+  //       const allFields = await redis.hGetAll(redisKey);
+  //       for (const fieldKey of Object.keys(allFields)) {
+  //         if (fieldKey.startsWith(`${basePid}::`)) {
+  //           const pkg = fieldKey.split('::')[1];
+  //           if (!validPkgSet.has(pkg)) {
+  //             await redis.hDel(redisKey, fieldKey);
+  //           }
+  //         }
+  //       }
+
+  //       // For response, reflect the first package split
+  //       storedPackageType = normalizePkg(breakdown[0]?.package_type || derivedPackageType);
+  //       storedQuantity = breakdown[0]?.quantity || normalizedQuantity;
+  //       storedPrice = breakdown[0]?.extended_price || computedTotalPrice;
+  //     } else {
+  //       const itemData = {
+  //         ...(existing || {}),
+  //         userId,
+  //         productId: product.semicon_part_number || productId,
+  //         quantity: normalizedQuantity,
+  //         name: product.name || existing?.name || '',
+  //         price: computedTotalPrice,
+  //         packageType: derivedPackageType,
+  //         description: product.description || existing?.description || '',
+  //         manufacturerName: product.manufacturer_name || existing?.manufacturerName || '',
+  //         manufacturerPartNumber: product.manufacturer_part_number || existing?.manufacturerPartNumber || '',
+  //         datasheetUrl: product.datasheet_url || existing?.datasheetUrl || '',
+  //         imageUrl: product.image_url || existing?.imageUrl || '',
+  //         createdBy: existing?.createdBy || userId,
+  //         modifiedBy: userId,
+  //         createdDate: existing?.createdDate ? new Date(existing.createdDate) : now,
+  //         modifiedDate: now,
+  //         status: product.status ?? (existing?.status ?? true),
+  //         packagingBreakdown: breakdown,
+  //       };
+  //       await redis.hSet(redisKey, compositeFieldKey, JSON.stringify(itemData));
+  //     }
+
+  //     await redis.expire(redisKey, 86400);
+
+  //     // Do NOT write to Postgres here. Redis is the source of truth; CartSyncService will sync to Postgres.
+
+  //     this.kafkaClient.emit('cart.item.added', {
+  //       userId,
+  //       productId: product.semicon_part_number || productId,
+  //       quantity: storedQuantity,
+  //       packageType: storedPackageType,
+  //       price: storedPrice, // extended total stored as price
+  //       status: 'success',
+  //       message: 'Cart item added or updated',
+  //       timestamp: now.toISOString(),
+  //     });
+
+  //     // Build response reflecting actual stored items
+  //     const responseItems = Array.isArray(breakdown) && breakdown.length > 0
+  //       ? breakdown.map((b: any) => ({
+  //           userId,
+  //           productId: product.semicon_part_number || productId,
+  //           quantity: typeof b?.quantity === 'number' ? b.quantity : normalizedQuantity,
+  //           packageType: normalizePkg(b?.package_type || storedPackageType),
+  //           price: typeof b?.extended_price === 'number' ? b.extended_price : storedPrice,
+  //         }))
+  //       : [{
+  //           userId,
+  //           productId: product.semicon_part_number || productId,
+  //           quantity: storedQuantity,
+  //           packageType: storedPackageType,
+  //           price: storedPrice,
+  //         }];
+
+  //     return this.respond(200, 'Item successfully added in cart', { items: responseItems });
+  //   } catch (error: any) {
+  //     console.error('❌ Error fetching/adding product:', error?.message);
+  //     return this.handleCatch(error, 'Internal server error');
+  //   }
+  // }
+
+  async handleAddToCart(body: {
+  userId: string;
+  productId: string;
+  quantity: number;
+  price?: number;
+  packageType?: string;
+}): Promise<{ error: boolean; message: any; data: Record<string, any>; statusCode?: number }> {
+  try {
+    const { userId, productId, quantity, price: userPrice, packageType } = body;
+    const redis = this.redisService.getClient();
+    const redisKey = `cart:${userId}`;
+
+    const normalizePkg = (s?: string) => (typeof s === 'string' ? s.trim() : s);
+    const makeFieldKey = (pid: string, pkg?: string) => (pkg ? `${pid}::${normalizePkg(pkg)}` : pid);
+
+    if (!userId || !productId || typeof quantity !== 'number' || quantity < 0) {
+      return this.respond(402, 'Invalid input. userId, productId and non-negative quantity are required');
+    }
+
+    if (quantity === 0) {
+      return await this.handleRemoveFromCart(userId, productId, packageType);
+    }
+
+    // build external URL
+    let baseUrl = this.configService.get<string>('PRODUCT_SERVICE_URL');
+    if (!baseUrl || baseUrl.includes('${')) {
+      const host = this.configService.get<string>('PRODUCT_SERVICE_HOST');
+      const port = this.configService.get<string>('PRODUCT_SERVICE_PORT');
+      baseUrl = `http://${host}:${port}`;
+    }
+    baseUrl = baseUrl.replace(/\/+$/, '');
+    const externalUrl = `${baseUrl}/product/quantity-price/check/${productId}/${quantity}`;
+
+    let response;
+    try {
+      response = await firstValueFrom(
+        this.httpService.get(externalUrl).pipe(
+          catchError((error) => {
+            console.error('❌ Product service error:', error.message);
+            if (error.response?.status === 404) {
+              return of({ data: { product: null, error: true, message: 'Product not found' } });
+            }
+            return of({ data: { product: null, error: true, message: 'Product service unavailable' } });
+          }),
+        ),
+      );
+    } catch (error: any) {
+      return this.respond(500, 'Failed to fetch product details');
+    }
+
+    const responseData = response.data;
+    const payload = responseData?.data || responseData;
+    const product = payload?.product;
+
+    if (!product || responseData?.error) {
+      const message = responseData?.message || 'Product not found';
+      return this.respond(404, message);
+    }
+
+    const breakdown = Array.isArray(payload?.packaging_breakdown) ? payload.packaging_breakdown : [];
+    const derivedPackageType = packageType || (breakdown.length > 0 ? breakdown[0].package_type : undefined);
+    const computedTotalPrice =
+      typeof payload?.total_price === 'number'
+        ? payload.total_price
+        : (Array.isArray(breakdown)
+            ? breakdown.reduce((sum: number, b: any) => sum + (typeof b?.extended_price === 'number' ? b.extended_price : 0), 0)
+            : 0) || (typeof userPrice === 'number' ? userPrice : 0);
+
+    const now = new Date();
+    let storedPackageType = derivedPackageType;
+    let storedQuantity = quantity;
+    let storedPrice = computedTotalPrice;
+
+    // ✅ Case 1 vs Case 2
+    if (Array.isArray(breakdown) && breakdown.length > 0) {
+      if (packageType) {
+        // 🚀 Case 2: Update only requested packageType
+        const pkgMatch = breakdown.find((b: any) => normalizePkg(b?.package_type) === normalizePkg(packageType));
+        if (!pkgMatch) {
+          return this.respond(404, `Package type ${packageType} not found for product ${productId}`);
+        }
+
+        const fieldKey = makeFieldKey(product.semicon_part_number || productId, packageType);
+        const existingSplitJson = await redis.hGet(redisKey, fieldKey);
+        const existingSplit: any = existingSplitJson ? JSON.parse(existingSplitJson) : null;
+
+        const itemData = {
+          ...(existingSplit || {}),
+          userId,
+          productId: product.semicon_part_number || productId,
+          quantity: pkgMatch.quantity,
+          name: product.name || existingSplit?.name || '',
+          price: pkgMatch.extended_price,
+          packageType: normalizePkg(packageType),
+          description: product.description || existingSplit?.description || '',
+          manufacturerName: product.manufacturer_name || existingSplit?.manufacturerName || '',
+          manufacturerPartNumber: product.manufacturer_part_number || existingSplit?.manufacturerPartNumber || '',
+          datasheetUrl: product.datasheet_url || existingSplit?.datasheetUrl || '',
+          imageUrl: product.image_url || existingSplit?.imageUrl || '',
+          createdBy: existingSplit?.createdBy || userId,
+          modifiedBy: userId,
+          createdDate: existingSplit?.createdDate ? new Date(existingSplit.createdDate) : now,
+          modifiedDate: now,
+          status: product.status ?? (existingSplit?.status ?? true),
+          packagingBreakdown: breakdown,
+        };
+
+        await redis.hSet(redisKey, fieldKey, JSON.stringify(itemData));
+
+        storedPackageType = normalizePkg(packageType);
+        storedQuantity = pkgMatch.quantity;
+        storedPrice = pkgMatch.extended_price;
+      } else {
+        // 🚀 Case 1: First time add → reset all packageTypes
         for (const b of breakdown) {
           const pkgType = normalizePkg(b?.package_type || derivedPackageType);
-          const qty = typeof b?.quantity === 'number' ? b.quantity : normalizedQuantity;
+          const qty = typeof b?.quantity === 'number' ? b.quantity : quantity;
           const extended = typeof b?.extended_price === 'number' ? b.extended_price : computedTotalPrice;
           const fieldKey = makeFieldKey(product.semicon_part_number || productId, pkgType);
 
-          // Set exact quantities and totals from current breakdown (no accumulation)
           const existingSplitJson = await redis.hGet(redisKey, fieldKey);
           const existingSplit: any = existingSplitJson ? JSON.parse(existingSplitJson) : null;
 
@@ -147,36 +382,31 @@ export class CartService {
             ...(existingSplit || {}),
             userId,
             productId: product.semicon_part_number || productId,
-            quantity: qty, // exact quantity from current breakdown
-            name: product.name || existingSplit?.name || existing?.name || '',
-            price: extended, // exact extended total for this split
+            quantity: qty,
+            name: product.name || existingSplit?.name || '',
+            price: extended,
             packageType: pkgType,
-            description: product.description || existingSplit?.description || existing?.description || '',
-            manufacturerName: product.manufacturer_name || existingSplit?.manufacturerName || existing?.manufacturerName || '',
-            manufacturerPartNumber: product.manufacturer_part_number || existingSplit?.manufacturerPartNumber || existing?.manufacturerPartNumber || '',
-            datasheetUrl: product.datasheet_url || existingSplit?.datasheetUrl || existing?.datasheetUrl || '',
-            imageUrl: product.image_url || existingSplit?.imageUrl || existing?.imageUrl || '',
-            createdBy: existingSplit?.createdBy || existing?.createdBy || userId,
+            description: product.description || existingSplit?.description || '',
+            manufacturerName: product.manufacturer_name || existingSplit?.manufacturerName || '',
+            manufacturerPartNumber: product.manufacturer_part_number || existingSplit?.manufacturerPartNumber || '',
+            datasheetUrl: product.datasheet_url || existingSplit?.datasheetUrl || '',
+            imageUrl: product.image_url || existingSplit?.imageUrl || '',
+            createdBy: existingSplit?.createdBy || userId,
             modifiedBy: userId,
-            createdDate: existingSplit?.createdDate ? new Date(existingSplit.createdDate) : (existing?.createdDate ? new Date(existing.createdDate) : now),
+            createdDate: existingSplit?.createdDate ? new Date(existingSplit.createdDate) : now,
             modifiedDate: now,
-            status: product.status ?? (existingSplit?.status ?? existing?.status ?? true),
-            // Keep full breakdown for transparency, even though row is split
+            status: product.status ?? (existingSplit?.status ?? true),
             packagingBreakdown: breakdown,
           };
 
           await redis.hSet(redisKey, fieldKey, JSON.stringify(itemData));
         }
 
-        // Remove any legacy/base entry without packageType to avoid duplicates
+        // clean up duplicates
         const basePid = product.semicon_part_number || productId;
         await redis.hDel(redisKey, basePid);
-
-        // Remove any split entries for this product that are NOT in the current breakdown
         const validPkgSet = new Set(
-          breakdown
-            .map((b: any) => normalizePkg(b?.package_type || derivedPackageType))
-            .filter((x: any) => !!x)
+          breakdown.map((b: any) => normalizePkg(b?.package_type || derivedPackageType)).filter((x: any) => !!x)
         );
         const allFields = await redis.hGetAll(redisKey);
         for (const fieldKey of Object.keys(allFields)) {
@@ -188,72 +418,97 @@ export class CartService {
           }
         }
 
-        // For response, reflect the first package split
         storedPackageType = normalizePkg(breakdown[0]?.package_type || derivedPackageType);
-        storedQuantity = breakdown[0]?.quantity || normalizedQuantity;
+        storedQuantity = breakdown[0]?.quantity || quantity;
         storedPrice = breakdown[0]?.extended_price || computedTotalPrice;
-      } else {
-        const itemData = {
-          ...(existing || {}),
-          userId,
-          productId: product.semicon_part_number || productId,
-          quantity: normalizedQuantity,
-          name: product.name || existing?.name || '',
-          price: computedTotalPrice,
-          packageType: derivedPackageType,
-          description: product.description || existing?.description || '',
-          manufacturerName: product.manufacturer_name || existing?.manufacturerName || '',
-          manufacturerPartNumber: product.manufacturer_part_number || existing?.manufacturerPartNumber || '',
-          datasheetUrl: product.datasheet_url || existing?.datasheetUrl || '',
-          imageUrl: product.image_url || existing?.imageUrl || '',
-          createdBy: existing?.createdBy || userId,
-          modifiedBy: userId,
-          createdDate: existing?.createdDate ? new Date(existing.createdDate) : now,
-          modifiedDate: now,
-          status: product.status ?? (existing?.status ?? true),
-          packagingBreakdown: breakdown,
-        };
-        await redis.hSet(redisKey, compositeFieldKey, JSON.stringify(itemData));
       }
+    } else {
+      // no breakdown, treat as single package
+      const compositeFieldKey = makeFieldKey(productId, normalizePkg(packageType));
+      const existingJson = await redis.hGet(redisKey, compositeFieldKey);
+      const existing: any = existingJson ? JSON.parse(existingJson) : null;
 
-      await redis.expire(redisKey, 86400);
-
-      // Do NOT write to Postgres here. Redis is the source of truth; CartSyncService will sync to Postgres.
-
-      this.kafkaClient.emit('cart.item.added', {
+      const itemData = {
+        ...(existing || {}),
         userId,
         productId: product.semicon_part_number || productId,
-        quantity: storedQuantity,
-        packageType: storedPackageType,
-        price: storedPrice, // extended total stored as price
-        status: 'success',
-        message: 'Cart item added or updated',
-        timestamp: now.toISOString(),
-      });
+        quantity,
+        name: product.name || existing?.name || '',
+        price: computedTotalPrice,
+        packageType: derivedPackageType,
+        description: product.description || existing?.description || '',
+        manufacturerName: product.manufacturer_name || existing?.manufacturerName || '',
+        manufacturerPartNumber: product.manufacturer_part_number || existing?.manufacturerPartNumber || '',
+        datasheetUrl: product.datasheet_url || existing?.datasheetUrl || '',
+        imageUrl: product.image_url || existing?.imageUrl || '',
+        createdBy: existing?.createdBy || userId,
+        modifiedBy: userId,
+        createdDate: existing?.createdDate ? new Date(existing.createdDate) : now,
+        modifiedDate: now,
+        status: product.status ?? (existing?.status ?? true),
+        packagingBreakdown: breakdown,
+      };
+      await redis.hSet(redisKey, compositeFieldKey, JSON.stringify(itemData));
 
-      // Build response reflecting actual stored items
-      const responseItems = Array.isArray(breakdown) && breakdown.length > 0
-        ? breakdown.map((b: any) => ({
-            userId,
-            productId: product.semicon_part_number || productId,
-            quantity: typeof b?.quantity === 'number' ? b.quantity : normalizedQuantity,
-            packageType: normalizePkg(b?.package_type || storedPackageType),
-            price: typeof b?.extended_price === 'number' ? b.extended_price : storedPrice,
-          }))
-        : [{
-            userId,
-            productId: product.semicon_part_number || productId,
-            quantity: storedQuantity,
-            packageType: storedPackageType,
-            price: storedPrice,
-          }];
-
-      return this.respond(200, 'Item successfully added in cart', { items: responseItems });
-    } catch (error: any) {
-      console.error('❌ Error fetching/adding product:', error?.message);
-      return this.handleCatch(error, 'Internal server error');
+      storedPackageType = derivedPackageType;
+      storedQuantity = quantity;
+      storedPrice = computedTotalPrice;
     }
+
+    await redis.expire(redisKey, 86400);
+
+    // kafka event
+    this.kafkaClient.emit('cart.item.added', {
+      userId,
+      productId: product.semicon_part_number || productId,
+      quantity: storedQuantity,
+      packageType: storedPackageType,
+      price: storedPrice,
+      status: 'success',
+      message: 'Cart item added or updated',
+      timestamp: now.toISOString(),
+    });
+
+    // ✅ Build response
+    let responseItems: any[];
+    if (packageType) {
+      // case 2: return only the updated packageType
+      responseItems = [
+        {
+          userId,
+          productId: product.semicon_part_number || productId,
+          quantity: storedQuantity,
+          packageType: storedPackageType,
+          price: storedPrice,
+        },
+      ];
+    } else if (Array.isArray(breakdown) && breakdown.length > 0) {
+      responseItems = breakdown.map((b: any) => ({
+        userId,
+        productId: product.semicon_part_number || productId,
+        quantity: b?.quantity,
+        packageType: normalizePkg(b?.package_type || storedPackageType),
+        price: b?.extended_price,
+      }));
+    } else {
+      responseItems = [
+        {
+          userId,
+          productId: product.semicon_part_number || productId,
+          quantity: storedQuantity,
+          packageType: storedPackageType,
+          price: storedPrice,
+        },
+      ];
+    }
+
+    return this.respond(200, 'Item successfully added in cart', { items: responseItems });
+  } catch (error: any) {
+    console.error('❌ Error fetching/adding product:', error?.message);
+    return this.handleCatch(error, 'Internal server error');
   }
+}
+
 
   async handleGetCartItems(userId: string): Promise<{ error: boolean; message: any; data: Record<string, any>; statusCode?: number }> {
     try {
