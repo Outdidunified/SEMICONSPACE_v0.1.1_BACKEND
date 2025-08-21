@@ -16,7 +16,7 @@ logger = get_logger("rate_limit")
 
 def register_rate_limiter(app) -> None:
     window_seconds = int(os.getenv("RATE_LIMIT_WINDOW_SECONDS", "900"))
-    max_requests = int(os.getenv("RATE_LIMIT_MAX_REQUESTS", "100"))
+    max_requests = int(os.getenv("RATE_LIMIT_MAX_REQUESTS", "1000"))
 
     lock = asyncio.Lock()
     # counters: ip -> (count, window_start_monotonic)
