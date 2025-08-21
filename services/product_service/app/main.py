@@ -83,9 +83,7 @@ app = FastAPI(lifespan=lifespan)
 from app.middleware.request_logging import register_request_logging
 register_request_logging(app)
 
-# Register simple rate-limiter middleware (per-IP)
-from app.middleware.rate_limiter import register_rate_limiter
-register_rate_limiter(app)
+# Rate limiter disabled
 
 app.add_middleware(
     CORSMiddleware,
