@@ -144,7 +144,17 @@ async def get_product_by_id(product_id: str):
             "semicon_part_number": product.semicon_part_number
         }).to_list(length=None)
         
-        print(f"📦 Found {len(vendor_products)} vendor products")
+        # Deduplicate vendor products by (vendor_name, vendor_product_number, semicon_part_number)
+        deduped_vendor_products = []
+        seen_vendor_keys = set()
+        for vp in vendor_products:
+            key = (vp.get('vendor_name'), vp.get('vendor_product_number'), vp.get('semicon_part_number'))
+            if key in seen_vendor_keys:
+                continue
+            seen_vendor_keys.add(key)
+            deduped_vendor_products.append(vp)
+        vendor_products = deduped_vendor_products
+        print(f"📦 Found {len(vendor_products)} vendor products after deduping")
 
         # Step 3: Get product variants and parameters
         product_variants = []
@@ -165,10 +175,30 @@ async def get_product_by_id(product_id: str):
                     "semicon_product_variant_id": {"$in": all_variant_ids}
                 }).to_list(length=None)
                 
-                print(f"✅ Found {len(variants)} product variants")
+                # 1) Block Digi-Reel packages and similar packaging we don't want to show (handles variants like "Digi-Reel®")
+                filtered_variants = []
+                for v in variants:
+                    raw_pt = (v.get('package_type') or '')
+                    norm = ''.join(ch for ch in raw_pt.lower() if ch.isalnum())  # normalize: remove spaces/symbols
+                    if 'digireel' in norm:
+                        continue
+                    filtered_variants.append(v)
+                variants = filtered_variants
+
+                # 2) Deduplicate by vendor_part_number and semicon_product_variant_id
+                unique_seen = set()  # (vendor_part_number, semicon_product_variant_id)
+                deduped_variants = []
+                for v in variants:
+                    key = (v.get('vendor_part_number'), v.get('semicon_product_variant_id'))
+                    if key in unique_seen:
+                        continue
+                    unique_seen.add(key)
+                    deduped_variants.append(v)
+                
+                print(f"✅ Found {len(deduped_variants)} product variants after filtering/deduping")
 
                 # Step 4: Get pricing details for each variant
-                for variant in variants:
+                for variant in deduped_variants:
                     pricing_ids = variant.get('semicon_product_variant_pricing_id', [])
                     if pricing_ids:
                         pricing_docs = await db.variant_pricing.find({
@@ -178,7 +208,7 @@ async def get_product_by_id(product_id: str):
                         # Add pricing details to variant
                         variant['pricing_details'] = pricing_docs[0] if pricing_docs else None
                 
-                product_variants = variants
+                product_variants = deduped_variants
 
         # Step 5: Construct the final result structure
         result_doc = {
@@ -223,8 +253,9 @@ async def get_product_by_id(product_id: str):
                 "ProductStatus": product_details_doc.get("ProductStatus") if product_details_doc else None
             },
             "VendorProducts": [
-                {**vp, "parameters": all_parameters} for vp in vendor_products
-            ],  # Include parameters in each VendorProduct
+                {**vp, "parameters": list({(p.get('parameter_id'), p.get('value_id'), p.get('value_text')): p for p in all_parameters}.values())}
+                for vp in vendor_products
+            ],  # Include de-duplicated parameters in each VendorProduct
             "ProductVariants": product_variants
         }
 
@@ -280,7 +311,7 @@ async def get_product_by_id(product_id: str):
             }
 
         return {
-            "error": False,
+            "success": True,
             "message": "Product retrieved successfully",
             "data": {
                 "id": result_doc["_id"],

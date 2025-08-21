@@ -265,59 +265,100 @@ async def fetch_and_sync_semicon_product(digikey_data: dict):
     await db.save(details)
 
     # -------- VENDOR PRODUCT --------
-    vpid = f"SVPID-{await  get_vendor_id()}"
-    print(vpid)
-    
-    vendor_product = VendorProduct(
-        id=uuid.uuid4(),
-        semicon_vendor_id=vpid,
-        vendor_name="digikey",
-        vendor_product_number=digikey_data.get("manufacturerPartNumber", "UNKNOWN"),
-        created_by="admin",
-        modified_by="admin",
-        status=True,
-        product_variants=[],
-        semicon_part_number=semicon_part_number,
-        parameters=[]
+    # Reuse existing vendor product if present to avoid duplicates
+    existing_vendor_product = await db.find_one(
+        VendorProduct,
+        (VendorProduct.semicon_part_number == semicon_part_number)
+        & (VendorProduct.vendor_name == "digikey")
+        & (VendorProduct.vendor_product_number == (digikey_data.get("manufacturerPartNumber", "UNKNOWN")))
     )
 
-    all_parameters = []
-    variant_ids = []
+    if existing_vendor_product:
+        vendor_product = existing_vendor_product
+        vpid = vendor_product.semicon_vendor_id
+    else:
+        vpid = f"SVPID-{await get_vendor_id()}"
+        print(vpid)
+        vendor_product = VendorProduct(
+            id=uuid.uuid4(),
+            semicon_vendor_id=vpid,
+            vendor_name="digikey",
+            vendor_product_number=digikey_data.get("manufacturerPartNumber", "UNKNOWN"),
+            created_by="admin",
+            modified_by="admin",
+            status=True,
+            product_variants=[],
+            semicon_part_number=semicon_part_number,
+            parameters=[]
+        )
 
-    
-    # Set to track unique parameters (based on ParameterId, ValueId, ValueText)
-    unique_params = set()
+    all_parameters = list(vendor_product.parameters or [])
+    variant_ids = list(vendor_product.product_variants or [])
 
-    # Pre-generate counters to reduce awaits inside the loop
-    variations = digikey_data.get("productVariations", [])
+    # Preload existing vendor_part_numbers from already stored variants for this vendor_product
+    existing_vpns = set()
+    for vid in variant_ids:
+        vdoc = await db.find_one(VendorProductVariant, VendorProductVariant.semicon_product_variant_id == vid)
+        if vdoc:
+            existing_vpns.add(vdoc.vendor_part_number or "UNKNOWN")
 
-    # Process parameters once (shared across variants)
-    if not all_parameters:
-        param_docs = []
-        for param in digikey_data.get("parameters", []):
+    # Dedupe incoming variations by unique vendor part number to avoid duplicate variants
+    raw_variations = digikey_data.get("productVariations", [])
+    seen_vpns = set(existing_vpns)
+    variations = []
+    for v in raw_variations:
+        vpn = v.get("digiKeyPartNumber") or v.get("DigiKeyProductNumber") or v.get("productNumber") or "UNKNOWN"
+        if vpn in seen_vpns:
+            continue
+        seen_vpns.add(vpn)
+        variations.append(v)
+
+    # Deduplicate and upsert parameters once (shared across variants)
+    seen_param_values = set()  # key: (parameter_text_lower, value_text_lower)
+    for param in digikey_data.get("parameters", []):
+        ptext_raw = (param.get("ParameterText") or "").strip()
+        vtext_raw = str(param.get("ValueText") or "").strip()
+        key = (ptext_raw.lower(), vtext_raw.lower())
+        if key in seen_param_values:
+            continue
+        seen_param_values.add(key)
+
+        # Try to reuse existing parameter meta by DigiKey ParameterId (preferred)
+        param_doc = None
+        if param.get("ParameterId") is not None:
+            param_doc = await db.find_one(
+                VendorProductVariantParameter,
+                VendorProductVariantParameter.digikey_parameter_id == param.get("ParameterId")
+            )
+        # Fallback: match by parameter_text when ParameterId is missing
+        if not param_doc and ptext_raw:
+            param_doc = await db.find_one(
+                VendorProductVariantParameter,
+                VendorProductVariantParameter.parameter_text == ptext_raw
+            )
+        if not param_doc:
             spara_id = f"SPARAID-{await get_next_parameter_counter()}"
-            param_docs.append((spara_id, param))
-        # Save parameter docs concurrently
-        async def build_and_save_param(spara_id: str, param: dict):
             param_doc = VendorProductVariantParameter(
                 semicon_parameter_id=spara_id,
                 digikey_parameter_id=param.get("ParameterId"),
-                parameter_text=param.get("ParameterText") or "Unknown",
+                parameter_text=ptext_raw or "Unknown",
                 parameter_type="ParameterType",
                 created_by="admin",
                 modified_by="admin",
                 status=True
             )
             await db.save(param_doc)
-            param_key = (param.get("ParameterId"), str(param.get("ValueId", "")), param.get("ValueText") or "Unknown")
-            if param_key not in unique_params:
-                unique_params.add(param_key)
-                all_parameters.append(VariantParameter(
-                    parameter_id=spara_id,
-                    value_id=str(param.get("ValueId", "")),
-                    value_text=param.get("ValueText") or "Unknown"
-                ))
-        await asyncio.gather(*(build_and_save_param(pid, p) for pid, p in param_docs))
+        # Append parameter reference if not already present on the vendor_product
+        vp_param_key = (param_doc.semicon_parameter_id, str(param.get("ValueId", "")), vtext_raw)
+        if not any(
+            (pp.parameter_id, pp.value_id, (pp.value_text or "")) == vp_param_key
+            for pp in all_parameters
+        ):
+            all_parameters.append(VariantParameter(
+                parameter_id=param_doc.semicon_parameter_id,
+                value_id=str(param.get("ValueId", "")),
+                value_text=vtext_raw or "Unknown"
+            ))
 
     async def process_variation(variation: dict):
         variant_id = f"SPVID-{await get_next_variant_counter()}"
