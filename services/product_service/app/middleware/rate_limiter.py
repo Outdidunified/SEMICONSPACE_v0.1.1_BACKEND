@@ -9,7 +9,7 @@ from app.utils.logging_config import get_logger
 # Simple in-memory, per-IP rate limiter middleware
 # Configure via env:
 # - RATE_LIMIT_WINDOW_SECONDS (default 900 = 15 minutes)
-# - RATE_LIMIT_MAX_REQUESTS (default 100)
+# - RATE_LIMIT_MAX_REQUESTS (default =500)
 
 logger = get_logger("rate_limit")
 

@@ -816,13 +816,14 @@ async def check_product_availability(
         product_details = await get_product_by_id(semicon_part_number)
         variants = product_details["data"]["detailed_info"]["ProductVariants"]
 
-        allowed_package_types = [
-            "Cut Tape (CT)", "Tape & Reel (TR)", "Tray", "Bulk", "Tube", "Reel", "Box"
-        ]
+        def is_digireel(pkg: str) -> bool:
+            raw_pt = (pkg or "")
+            norm = "".join(ch for ch in raw_pt.lower() if ch.isalnum())
+            return "digireel" in norm
+
         matching_variants = [
             v for v in variants
-            if v.get("package_type") in allowed_package_types
-            and "DigiReel" not in v.get("package_type", "")
+            if not is_digireel(v.get("package_type"))
         ]
         if not matching_variants:
             raise HTTPException(status_code=400, detail="No pricing available for supported package types")
