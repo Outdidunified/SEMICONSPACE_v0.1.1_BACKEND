@@ -129,7 +129,7 @@ export class ManageUserService {
         order: [[sortBy, sortOrder]],
         limit: limitNum,
         offset: offset,
-        attributes: { exclude: ['password'] }, // Don't return passwords
+        // Include all attributes including password
       });
 
       const totalPages = Math.ceil(count / limitNum);
@@ -159,22 +159,18 @@ export class ManageUserService {
       
       // Search by userId first (if provided)
       if (userId) {
-        profile = await this.profileModel.findByPk(userId, {
-          attributes: { exclude: ['password'] },
-        });
+        profile = await this.profileModel.findByPk(userId);
       }
       // If not found by userId or userId not provided, try email
       else if (email) {
         profile = await this.profileModel.findOne({
           where: { email },
-          attributes: { exclude: ['password'] },
         });
       }
       // If not found by email or email not provided, try phone
       else if (phone) {
         profile = await this.profileModel.findOne({
           where: { phone },
-          attributes: { exclude: ['password'] },
         });
       }
       
