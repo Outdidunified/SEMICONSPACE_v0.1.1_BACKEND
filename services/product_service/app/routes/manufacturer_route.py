@@ -36,9 +36,15 @@ async def sync_semicon_manufacturers():
 
 
 # ---------------- Utility: Transform Mongo Doc ----------------
-def transform_mongo_doc(doc):
-    """Transform MongoDB document to standard API response format"""
+def transform_mongo_doc(doc, counts_map: dict | None = None):
+    """Transform MongoDB document to standard API response format
+    counts_map optionally provides product counts keyed by semicon_manufacturer_id.
+    """
     doc_dict = doc.dict()
+    semicon_mid = doc_dict.get("semicon_manufacturer_id")
+    product_count = 0
+    if counts_map and semicon_mid:
+        product_count = int(counts_map.get(semicon_mid, 0))
     return {
         "created_by": doc_dict.get("created_by"),
         "created_date": doc_dict.get("created_date").isoformat().replace("+00:00", "Z") if doc_dict.get("created_date") else None,
@@ -46,8 +52,9 @@ def transform_mongo_doc(doc):
         "digikey_name": doc_dict.get("digikey_name"),
         "modified_by": doc_dict.get("modified_by"),
         "modified_date": doc_dict.get("modified_date").isoformat().replace("+00:00", "Z") if doc_dict.get("modified_date") else None,
-        "semicon_manufacturer_id": doc_dict.get("semicon_manufacturer_id"),
-        "status": doc_dict.get("status")
+        "semicon_manufacturer_id": semicon_mid,
+        "status": doc_dict.get("status"),
+        "product_count": product_count,
     }
 
 
@@ -56,11 +63,21 @@ def transform_mongo_doc(doc):
 @router.get("/manufacturer/all", tags=["Semicon Manufacturer"])
 async def get_all_manufacturersall():
     """
-    Get all manufacturers without pagination
+    Get all manufacturers without pagination, including product_count per manufacturer
     """
+    counts_map: dict[str, int] = {}
     try:
+        # Pre-aggregate product counts per semicon_manufacturer_id from semicon_product_details
+        detail_collection = engine.get_collection(SemiconProducts)
+        pipeline = [
+            {"$match": {"Manufacturer.semicon_manufacturer_id": {"$ne": None}}},
+            {"$group": {"_id": "$Manufacturer.semicon_manufacturer_id", "count": {"$sum": 1}}}
+        ]
+        counts_raw = await detail_collection.aggregate(pipeline).to_list(length=None)
+        counts_map = {doc["_id"]: doc["count"] for doc in counts_raw}
+
         raw_data = await engine.find(SemiconManufacturer)
-        cleaned_data = [transform_mongo_doc(doc) for doc in raw_data]
+        cleaned_data = [transform_mongo_doc(doc, counts_map) for doc in raw_data]
 
         return {
             "success": True,
@@ -77,7 +94,7 @@ async def get_all_manufacturersall():
             for doc in raw_docs:
                 try:
                     manufacturer = SemiconManufacturer.model_validate(doc)
-                    cleaned_data.append(transform_mongo_doc(manufacturer))
+                    cleaned_data.append(transform_mongo_doc(manufacturer, counts_map))
                 except Exception as inner_e:
                     logger.warning(f"Skipping invalid manufacturer document: {inner_e}")
 
@@ -96,13 +113,26 @@ async def get_all_manufacturers(
     limit: int = Query(100, ge=1, le=1000, description="Maximum number of records to return"),
 ):
     """
-    Get all manufacturers with pagination and standardized response format
+    Get all manufacturers with pagination and standardized response format, including product_count per manufacturer
     """
     try:
-        skip = (page - 1) * limit  # ✅ calculate skip dynamically
+        skip = (page - 1) * limit
 
-        raw_data = await engine.find(SemiconManufacturer, skip=skip, limit=limit)
-        cleaned_data = [transform_mongo_doc(doc) for doc in raw_data]
+        # Aggregate counts for only the manufacturer IDs in this page for efficiency
+        page_docs = await engine.find(SemiconManufacturer, skip=skip, limit=limit)
+        page_ids = [d.semicon_manufacturer_id for d in page_docs if getattr(d, "semicon_manufacturer_id", None)]
+
+        counts_map: dict[str, int] = {}
+        if page_ids:
+            detail_collection = engine.get_collection(SemiconProducts)
+            pipeline = [
+                {"$match": {"Manufacturer.semicon_manufacturer_id": {"$in": page_ids}}},
+                {"$group": {"_id": "$Manufacturer.semicon_manufacturer_id", "count": {"$sum": 1}}}
+            ]
+            counts_raw = await detail_collection.aggregate(pipeline).to_list(length=None)
+            counts_map = {doc["_id"]: doc["count"] for doc in counts_raw}
+
+        cleaned_data = [transform_mongo_doc(doc, counts_map) for doc in page_docs]
         total_count = await engine.count(SemiconManufacturer)
 
         return {
@@ -114,7 +144,7 @@ async def get_all_manufacturers(
                     "total": total_count,
                     "page": page,
                     "limit": limit,
-                    "pages": (total_count + limit - 1) // limit  # total pages
+                    "pages": (total_count + limit - 1) // limit
                 }
             }
         }
@@ -125,10 +155,22 @@ async def get_all_manufacturers(
         try:
             raw_docs = await engine.find(SemiconManufacturer, skip=(page - 1) * limit, limit=limit)
             cleaned_data = []
+            # fallback counts for this page
+            page_ids = [d.semicon_manufacturer_id for d in raw_docs if getattr(d, "semicon_manufacturer_id", None)]
+            counts_map = {}
+            if page_ids:
+                detail_collection = engine.get_collection(SemiconProducts)
+                pipeline = [
+                    {"$match": {"Manufacturer.semicon_manufacturer_id": {"$in": page_ids}}},
+                    {"$group": {"_id": "$Manufacturer.semicon_manufacturer_id", "count": {"$sum": 1}}}
+                ]
+                counts_raw = await detail_collection.aggregate(pipeline).to_list(length=None)
+                counts_map = {doc["_id"]: doc["count"] for doc in counts_raw}
+
             for doc in raw_docs:
                 try:
                     manufacturer = SemiconManufacturer.model_validate(doc)
-                    cleaned_data.append(transform_mongo_doc(manufacturer))
+                    cleaned_data.append(transform_mongo_doc(manufacturer, counts_map))
                 except Exception as inner_e:
                     logger.warning(f"Skipping invalid manufacturer document: {inner_e}")
 
