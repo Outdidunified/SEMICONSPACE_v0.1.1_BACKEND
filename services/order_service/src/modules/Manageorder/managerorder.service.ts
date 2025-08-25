@@ -100,21 +100,27 @@ export class ManagerOrderService {
     return existingOrder.toJSON();
   }
 
-  async findByUserId(userId: string) {
-    if (!userId) {
-      throw new BadRequestException('User ID is required');
-    }
-
-    this.validateUUID(userId, 'User ID');
-
-    const orders = await this.orderModel.findAll({ where: { userId } });
-
-    if (!orders || orders.length === 0) {
-      throw new NotFoundException(`No orders found for user ID ${userId}`);
-    }
-
-    return orders.map((order) => order.toJSON());
+async findByUserId(userId: string) {
+  if (!userId) {
+    throw new BadRequestException('User ID is required');
   }
+
+  this.validateUUID(userId, 'User ID');
+
+  // Fetch orders for the user excluding pending ones
+  const orders = await this.orderModel.findAll({
+    where: {
+      userId,
+      status: { [Op.ne]: 'pending' }, // exclude pending
+    },
+  });
+
+  if (!orders || orders.length === 0) {
+    throw new NotFoundException(`No orders found for user ID ${userId}`);
+  }
+
+  return orders.map((order) => order.toJSON());
+}
 
   async getAnalytics() {
     try {
